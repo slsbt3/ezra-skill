@@ -20,7 +20,7 @@
     --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --s7: 48px;
   }
   * { box-sizing: border-box; }
-  html { background: var(--bg); }
+  html { background: var(--bg); scrollbar-gutter: stable; }
   body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 15px; line-height: 1.55;
     padding: var(--s6) max(16px, 2vw) var(--s7); }
   .wrap { max-width: 1400px; margin: 0 auto; display: grid; gap: var(--s5); }
@@ -515,7 +515,10 @@ async function load() {
   // The owner's answers from the office (answers.json in Ezra's folder), so a question shows what he answered and whether Ezra passed it on.
   let answers = [];
   try { answers = (await readJson(root, ...EZRA, 'answers.json')).answers || []; } catch (e) { /* none yet */ }
-  return { rows, usage, skill, tools, archive, attendance, answers };
+  // The shared files changed today (Ezra\shared-today.json, from scripts\shared-watch.js), for the filing cabinet in the office.
+  let shared = null;
+  try { shared = await readJson(root, ...EZRA, 'shared-today.json'); } catch (e) { /* none yet */ }
+  return { rows, usage, skill, tools, archive, attendance, answers, shared };
 }
 
 // The tools menu, rebuilt only when tools.json changes.
@@ -1301,7 +1304,9 @@ function pxDeskMorph(dx, dy, p, t0, d, grow, ext = 0) {
 // The documents a worker of research and documents leaves on its desk for the owner (the owner, 22/11, on Bina: "מסמך שהיא מציגה לי
 // ... צריכים לשבת על השולחן שלה. מסמכים כאלה ישארו על השולחן
 // עד שאבקש להעיף"): "desk" in its card, entries as in "out" ({ label, path | url, at }). They stay until the worker takes them off.
-const pxDeskDocs = r => (r.s && r.s.desk != null ? (Array.isArray(r.s.desk) ? r.s.desk : [r.s.desk]) : []).map(o => {
+// Only for a worker whose projects.json row says "deskDocs": true (the owner, 22/11: "רק לבינה יש קלסר עם משימות שלה - מסמכים - עד שאני מבקש להעיף. רק לה");
+// for every other worker a document it shows the owner is the output ("out") of a task, and "desk" in its card is not shown.
+const pxDeskDocs = r => (r.p && r.p.deskDocs === true && r.s && r.s.desk != null ? (Array.isArray(r.s.desk) ? r.s.desk : [r.s.desk]) : []).map(o => {
   const t = pxOutTarget(o); if (!t || !(t.url || t.path)) return null;
   const BSL = String.fromCharCode(92), file = t.path ? String(t.path).split(BSL).join('/').split('/').pop() : '', at = o && typeof o === 'object' && o.at ? new Date(o.at) : null;
   return Object.assign(t, { name: t.label || file || t.url, at: at && !isNaN(at) ? at : null });
@@ -1470,7 +1475,15 @@ const pxBubbleEmoji = (x, y, e) => `<text x="${x}" y="${y}" text-anchor="middle"
 
 // ---- Fitting the office to the window: try 3 to 8 desks in a row and keep the one that shows the office biggest
 // without scrolling (width of the page, height of the window). On a tie, the wider one, so the sides are not left empty. ----
+// The choice stays as long as the window's size and the number of desks stay (the owner, 22/11: "כל פעם שמתעדכן הדף המשרד מקבל רוחב
+// שונה - למה?"): the width of <main> moves a little when the page's scrollbar comes or goes, and that changed the desks in a row.
+let pxFitLast = null;
 function pxFit(n, fixed) {
+  const key = n + '|' + fixed + '|' + window.innerWidth + 'x' + window.innerHeight;
+  if (pxFitLast && pxFitLast.key === key) return pxFitLast.fit;
+  const fit = pxFitNow(n, fixed); pxFitLast = { key, fit }; return fit;
+}
+function pxFitNow(n, fixed) {
   const main = $('main'), aw = Math.max(320, (main ? main.clientWidth : window.innerWidth) - 24), ah = Math.max(300, window.innerHeight - 96);
   let best = null;
   for (let c = 3; c <= Math.max(3, Math.min(8, n)); c++) {
@@ -2101,7 +2114,9 @@ function pxCloseup(kind, c) {
     body = `<h3>שעון הנוכחות · היום</h3><ul>${list.map(x => `<li>${who(x.p)}: ${x.m ? Math.floor(x.m / 60) + ':' + String(x.m % 60).padStart(2, '0') + ' שעות' : 'עוד לא עבד היום'}</li>`).join('')}</ul><p>לפי ה־hook: מתחילת כל תור של העובד עד סופו.</p>`;
   } else if (kind === 'cab') {
     cls = 'cu-cab';
-    body = `<h3>הארון המשותף</h3>` + (c.sList.length ? `<ul>${c.sList.map(g => `<li class="${g.list.length > 1 ? 'clash' : ''}"><b>${esc(g.file)}</b><div>${g.list.map(p => who(p)).join(' · ')}${g.list.length > 1 ? ' · ⚠ התנגשות' : ''}</div></li>`).join('')}</ul>` : '<p>אין קבצים משותפים בעבודה.</p>');
+    const ch = pxSharedNow.slice().reverse(), byWho = x => { const r = x.by && c.rowsById[x.by]; return r ? who(r.p) + (x.guess ? ' (כנראה)' : '') : 'לא ידוע'; };
+    body = `<h3>קבצים משותפים ששונו היום</h3>` + (ch.length ? `<ul>${ch.map(x => `<li><b>${esc(x.name)}</b><div>${esc(pxSharedTime(x))} · ${byWho(x)} · MD5 ${esc(x.to || '')}${x.from ? ' (היה ' + esc(x.from) + ')' : ''}</div></li>`).join('')}</ul>` : '<p>היום עוד לא השתנה קובץ משותף.</p>') +
+      (c.sList.length ? `<h3>בעבודה עכשיו</h3><ul>${c.sList.map(g => `<li class="${g.list.length > 1 ? 'clash' : ''}"><b>${esc(g.file)}</b><div>${g.list.map(p => who(p)).join(' · ')}${g.list.length > 1 ? ' · ⚠ התנגשות' : ''}</div></li>`).join('')}</ul>` : '');
   } else if (kind === 'tv') {
     cls = 'cu-tv';
     body = `<div class="screen"><h3>עדכונים אחרונים</h3>` + (c.events.length ? `<ul>${c.events.slice(0, 40).map(e => `<li><time>${esc(stamp(e.at))}</time> <span style="color:${esc(e.color || '#f4f4f6')}">${esc(e.who)}</span> ${esc(e.text)}</li>`).join('')}</ul>` : '<p>עוד אין עדכונים.</p>') + `</div>`;
@@ -2120,6 +2135,59 @@ function pxCloseup(kind, c) {
   return `<div class="closeup" data-act="close" role="dialog"><div class="cu ${cls}" data-act="noop">${x}${body}</div></div>`;
 }
 
+// The shared files changed today, for the filing cabinet (the owner, 22/11: "הארון קבצים - אף פעם לא ראיתי שהוא בשימוש", then
+// "קבצים משותפים ששונו היום"): Ezra\shared-today.json, only when it is from today. Each: { name, at, by, guess, from, to, approx }.
+let pxSharedNow = [];
+const pxSharedToday = s => { const d = new Date(), k = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  return s && s.date === k && Array.isArray(s.changes) ? s.changes.filter(c => c && c.name && c.at) : []; };
+const pxSharedTime = c => (c.approx ? 'בערך ' : '') + String(c.at).slice(11, 16);
+// The cabinet's tooltip: today's changes, newest first, then the files in work now (from the cards' "touching").
+function pxCabTip(sList, byId) {
+  const ch = pxSharedNow.slice().reverse(), whoOf = c => { const p = c.by && byId[c.by]; return p ? p.emoji + ' ' + (pxShortOf[c.by] || p.name) + (c.guess ? ' (כנראה)' : '') : 'לא ידוע'; };
+  const a = ch.length ? 'קבצים משותפים ששונו היום:\n' + ch.slice(0, 12).map(c => pxSharedTime(c) + '  ' + c.name + ' · ' + whoOf(c)).join('\n') + (ch.length > 12 ? '\n…' : '') : 'היום לא השתנה קובץ משותף';
+  const b = sList.length ? '\n\nבעבודה עכשיו:\n' + sList.map(g => g.file + ' · ' + g.list.map(p => p.emoji + ' ' + p.name).join(', ')).join('\n') : '';
+  return a + b + '\nלחיצה: הרשימה'; }
+// The filing cabinet, design "א · מתכת אפורה" (the owner chose it from three, 22/11, after "איכ איזה עיצוב מכוער"): three drawers
+// ("תוסיף עוד מגירה שיהיו 3") with a light top edge, a dark bottom edge, a cream label and a handle. When something changed today
+// the top drawer stands open, pulled toward us, and what is in it shows: paper tops, every third one in the color of who changed
+// a file. More than 15 changes, the bottom drawer is open too ("המגירה התחתונה לא נסגרת עד הסוף"). Bottom first, so an open
+// drawer covers the top of the one under it.
+const PX_CAB = { face: '#AEB6C3', hi: '#CDD3DC', lo: '#7F8896', label: '#F3EEDC', line: '#6B7280', handle: '#3F4652', handleHi: '#6B7383', slot: '#262B34', paper: '#F2EDE0' };
+function pxCabDrawers(x, y, byId) {
+  const n = pxSharedNow.length, cols = pxCabColors(byId), C = PX_CAB;
+  const R = (rx, ry, w, h, c, o) => `<rect x="${+rx.toFixed(2)}" y="${+ry.toFixed(2)}" width="${+w.toFixed(2)}" height="${+h.toFixed(2)}" fill="${c}"${o || ''}/>`;
+  const face = (fx, fy, w) => { const cx = fx + w / 2;
+    return R(fx, fy, w, 6.2, C.face) + R(fx, fy, w, .7, C.hi) + R(fx, fy + 5.6, w, .6, C.lo) +
+      R(cx - 2.5, fy + 1.4, 5, 1.6, C.label, ` stroke="${C.line}" stroke-width=".25"`) + R(cx - 2, fy + 4, 4, .9, C.handle) + R(cx - 2, fy + 4, 4, .3, C.handleHi); };
+  const inside = (dy, papers, tall) => { let s = R(x + 1, dy, 14, 2, C.slot);
+    for (let k = 0; k < papers; k++) s += R(x + 1.7 + k * (12.4 / papers), dy + .3 + (k % 2) * .35, 1.2, 1.7 - (k % 2) * .35, k % 3 === 2 ? cols[k % cols.length] : C.paper);
+    for (let k = 0; k < tall; k++) s += pxCabBinder(x + 2.2 + k * 3.4, dy - 1.8, cols[(k + 1) % cols.length], PX_CAB_TILT[k % 4]);
+    return s; };
+  let s = '';
+  for (let i = 2; i >= 0; i--) {
+    const dy = y + 1 + i * 7, open = (i === 0 && n > 0) || (i === 2 && n > 15);
+    // The top drawer's binders stand up over the rim, so they are drawn after it (pxCabFill); the bottom one's here.
+    if (open) s += inside(dy, i === 0 ? (n > 10 ? 8 : Math.max(2, Math.ceil(n / 2))) : 7, i === 0 ? 0 : 2) + face(x + .5, dy + 2, 15);
+    else s += face(x + 1, dy, 14);
+  }
+  return s; }
+// A binder in an open drawer (the owner, 22/11: "הקלסר שמציץ לא יפה"): its spine in a worker's color, a light left edge and a darker
+// right one, a cream label with a line, and the round finger hole; leaning a little (tilt, degrees) around its foot in the drawer.
+const pxCabBinder = (bx, by, c, tilt = 0) => { const X = v => +v.toFixed(2), w = 2.4, h = 3.8;
+  return `<g${tilt ? ` transform="rotate(${tilt} ${X(bx + w / 2)} ${X(by + h)})"` : ''}><rect x="${X(bx)}" y="${X(by)}" width="${w}" height="${h}" fill="${c}"/>` +
+    `<rect x="${X(bx)}" y="${X(by)}" width=".45" height="${h}" fill="#FFFFFF" fill-opacity=".35"/><rect x="${X(bx + w - .45)}" y="${X(by)}" width=".45" height="${h}" fill="#000000" fill-opacity=".22"/>` +
+    `<rect x="${X(bx)}" y="${X(by)}" width="${w}" height=".3" fill="#000000" fill-opacity=".2"/><rect x="${X(bx + .5)}" y="${X(by + .55)}" width="1.4" height="1.1" fill="#F7F3E8"/><rect x="${X(bx + .65)}" y="${X(by + 1)}" width="1.1" height=".2" fill="#9AA3B5"/>` +
+    `<circle cx="${X(bx + w / 2)}" cy="${X(by + 2.75)}" r=".4" fill="#1F2430" shape-rendering="geometricPrecision"/></g>`; };
+const PX_CAB_TILT = [-9, 7, -4, 11];
+// The colors of who changed the files, newest first (grey for unknown).
+const pxCabColors = byId => { const l = pxSharedNow.slice().reverse().map(c => c.by && byId[c.by] ? pxTie(byId[c.by]) : '#94A3B8'); return l.length ? l : ['#94A3B8']; };
+// The binders standing up out of the open top drawer (the owner, 22/11: "אם יש יותר מ10 דברים המגירה נראת מלאה - מציץ קלסר - 15
+// מציצים שניים - מעל מציצים מלא"): more than 10, one; 15, two; more than 15, four. No count on the cabinet ("בלי בועה של 10").
+function pxCabFill(x, y, byId) {
+  const n = pxSharedNow.length, binders = n > 15 ? 4 : n >= 15 ? 2 : n > 10 ? 1 : 0; if (!binders) return '';
+  const cols = pxCabColors(byId); let s = '';
+  for (let k = 0; k < binders; k++) s += pxCabBinder(x + 1.6 + k * 3.3, y + 1 - 1.8, cols[(k + 1) % cols.length], PX_CAB_TILT[k % 4]);
+  return s; }
 function officeScene(workers, ezra, forGuy, sList, reqs, later, usage, events, attendance) {
   // The office fits the window: the number of desks in a row is the one that shows the office biggest without scrolling.
   // The owner's room, the waiting chairs, the cabinet and the lift stay at the right end, moved by RX.
@@ -2774,13 +2842,12 @@ function officeScene(workers, ezra, forGuy, sList, reqs, later, usage, events, a
     wall += `<rect x="${bx}" y="8" width="${bw}" height="${WALL - 8}" fill="#7A5236"/>` + [0, 1, 2].map(i => `<rect x="${bx + 2}" y="${10 + i * 8}" width="${bw - 4}" height="6" fill="#5A3A22"/>` +
       Array.from({ length: Math.floor((bw - 4) / 3) }, (_, j) => `<rect x="${bx + 2 + j * 3}" y="${11 + i * 8 + (j % 3 === 1 ? 1 : 0)}" width="2" height="${5 - (j % 3 === 1 ? 1 : 0)}" fill="${['#B91C1C', '#2563EB', '#16A34A', '#F59E0B', '#7C3AED'][(i * 7 + j) % 5]}"/>`).join('')).join(''); }
   const clash = sList.some(g => g.list.length > 1);
-  const cab = `<g class="who" data-act="open:cab"><title>${esc(sList.length ? 'קבצים משותפים בעבודה:\n' + sList.map(g => g.file + ' · ' + g.list.map(p => p.emoji + ' ' + p.name).join(', ')).join('\n') : 'אין קבצים משותפים בעבודה')}</title>` +
+  const cab = `<g class="who" data-act="open:cab"><title>${esc(pxCabTip(sList, byIdAll))}</title>` +
     // A tall filing cabinet standing against the wall next to the lift, with a plant on top; it blinks red on a clash.
     // A filing cabinet against the wall, with a plant on top; it blinks red on a clash.
-    `<rect x="${CX}" y="${CY}" width="16" height="22" fill="${clash ? '#B91C1C' : '#6E7684'}"${clash ? ' style="animation:pxblink 1s infinite"' : ''}/>` +
-    [0, 1].map(i => { const y = CY + 1 + i * 9;
-      return `<rect x="${CX + 1}" y="${y}" width="14" height="8" fill="#B9C0CC"/><rect x="${CX + 1}" y="${y}" width="14" height="1" fill="#D6DBE3"/><rect x="${CX + 5}" y="${y + 2}" width="6" height="2" fill="#FFFFFF" stroke="#8A92A0" stroke-width=".3"/><rect x="${CX + 6}" y="${y + 5}" width="4" height="1" fill="#4A5060"/>`; }).join('') +
-    `<rect x="${CX - 1}" y="${CY - 1}" width="18" height="1" fill="#565E6C"/>` + pxPlant(CX + 3, CY - 14) + `</g>`;
+    `<rect x="${CX}" y="${CY}" width="16" height="22" fill="${clash ? '#B91C1C' : '#5F6877'}"${clash ? ' style="animation:pxblink 1s infinite"' : ''}/>` +
+    pxCabDrawers(CX, CY, byIdAll) +
+    `<rect x="${CX - 1}" y="${CY - 1}" width="18" height="1.2" fill="#4B5361"/>` + pxPlant(CX + 3, CY - 14) + pxCabFill(CX, CY, byIdAll) + `</g>`;
   const punch = pxPunchClock(CX - 30, CY - 6, workers, attendance || []);
   // The lift is a door in the wall, a bit taller than a person; its display says "ארכיון". A click opens the warehouse of the archive.
   const LT = WALL - 33;
@@ -2912,6 +2979,7 @@ function renderOffice(data) {
     .concat(Array.isArray(data.archive) ? data.archive.filter(a => a && a.name) : []);
   pxStaff(workers, rows);
   pxShortNames(workers);
+  pxSharedNow = pxSharedToday(data.shared);
   const forGuy = rows.filter(r => r.s && waitText(r.s) && !r.p.archived);
   chimeIfNew(forGuy.map(r => r.p.id + '|' + waitText(r.s)));
   const LATER = /שבוע הבא|\(מחכה לתאריך/, later = [];
