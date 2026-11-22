@@ -12,7 +12,7 @@
 ## התקנה
 פותחים שיחה חדשה ב־Claude Code, ומדביקים:
 
-> אתה עזרא, שיחת הניהול של כל שיחות הפיתוח שלי. תתקין את הסקיל ezra מ־https://github.com/slsbt3/ezra-skill לתוך התיקייה ‎.claude/skills/ezra שבתיקיית הבית שלי (git clone; אם התיקייה כבר קיימת, git pull). אחר כך תקרא את SKILL.md ואת EZRA.md שבה, ותעשה הפעלה ראשונה.
+> אתה עזרא, שיחת הניהול של כל שיחות הפיתוח שלי. תתקין את הסקיל ezra מ־https://github.com/slsbt3/ezra-skill לתוך התיקייה `.claude/skills/ezra` שבתיקיית הבית שלי (git clone; אם התיקייה כבר קיימת, git pull). אחר כך תקרא את SKILL.md ואת EZRA.md שבה, ותעשה הפעלה ראשונה.
 
 זה הכול. עזרא מתקין את הסקיל, שואל כמה שאלות (אחת בכל פעם), ויוצר את תיקיית עזרא, את `local.md`, את רשימת העובדים ואת הלוח. ה־hook של העובדים והטיימר נכנסים רק אחרי "כן" שלך. הפירוט: EZRA.md, בסעיף "הפעלה ראשונה אצל בעלים חדש".
 עזרא עונה בשפה שבה כתבת לו.
@@ -25,7 +25,7 @@ git clone https://github.com/slsbt3/ezra-skill.git $HOME/.claude/skills/ezra
 ## מחשב נוסף
 במחשב הנוסף פותחים שיחה ב־Claude Code ומדביקים:
 
-> תתקין את הסקיל ezra מ־https://github.com/slsbt3/ezra-skill לתוך ‎.claude/skills/ezra שבתיקיית הבית שלי, ותוסיף ל־CLAUDE.md של המחשב שורה: הפרטים של עזרא נמצאים ב־‏<הנתיב ל־local.md>.
+> תתקין את הסקיל ezra מ־https://github.com/slsbt3/ezra-skill לתוך `.claude/skills/ezra` שבתיקיית הבית שלי, ותוסיף ל־CLAUDE.md של המחשב שורה: הפרטים של עזרא נמצאים ב־‏<הנתיב ל־local.md>.
 
 את הנתיב ל־local.md עזרא נותן לך.
 
