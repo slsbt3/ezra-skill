@@ -1,0 +1,33 @@
+{
+  "projects": [
+    {
+      "id": "ezra",
+      "emoji": "",
+      "name": "עזרא",
+      "color": "#FF6B35",
+      "folder": "Projects\\Ezra",
+      "machine": "המחשב של עזרא",
+      "role": "שיחת הניהול",
+      "owns": [],
+      "connects": [],
+      "address": "<השם של עזרא ב־ListAgents>"
+    },
+    {
+      "id": "alpha",
+      "emoji": "🟦",
+      "name": "Alpha",
+      "color": "#4FC3F7",
+      "folder": "Projects\\Alpha\\Docs",
+      "machine": "שרת · :3000",
+      "nickname": "",
+      "role": "מה העובד עושה, במשפט אחד",
+      "owns": [
+        "C:/Alpha"
+      ],
+      "connects": [],
+      "address": "<השם של העובד ב־ListAgents>",
+      "guide": false
+    }
+  ],
+  "shared": []
+}
