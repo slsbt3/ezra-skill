@@ -1225,12 +1225,13 @@ const pxCheck = (x, y) => `<rect x="${x}" y="${y}" width="6" height="5" fill="#1
 // on a dark badge, as big as the ✓ of one who finished. It took the place of a small grey "z" that was hard to see.
 const pxWaitMark = (x, y) => `<rect x="${x}" y="${y}" width="7" height="7" fill="#334155"/><rect x="${x + 1}" y="${y + 1}" width="5" height="1" fill="#E9DCC4"/><rect x="${x + 2}" y="${y + 2}" width="3" height="1" fill="#FFD23F"/><rect x="${x + 3}" y="${y + 3}" width="1" height="1" fill="#FFD23F"/><rect x="${x + 2}" y="${y + 4}" width="3" height="1" fill="#FFD23F"/><rect x="${x + 1}" y="${y + 5}" width="5" height="1" fill="#E9DCC4"/>`;
 const pxPlant = (x, y) => `<rect x="${x + 3}" y="${y}" width="4" height="3" fill="#4D9A3A"/><rect x="${x + 1}" y="${y + 2}" width="8" height="4" fill="#5DB44A"/><rect x="${x}" y="${y + 4}" width="3" height="3" fill="#3F8530"/><rect x="${x + 7}" y="${y + 4}" width="3" height="3" fill="#3F8530"/><rect x="${x + 2}" y="${y + 8}" width="6" height="5" fill="#B4663A"/><rect x="${x + 2}" y="${y + 8}" width="6" height="1" fill="#D08452"/>`;
-// A blue envelope for a request from one worker to another, now and then (3 seconds out of every 10).
-function pxEnv(x1, y1, x2, y2, k, tip) {
+// A blue envelope for a request from one worker to another, now and then (3 seconds out of every 10), with the sender's emoji (22/11).
+function pxEnv(x1, y1, x2, y2, k, tip, em) {
   const d = `M${x1},${y1} C ${x1 + 20},${y1 - 40} ${x2 - 30},${y2 - 30} ${x2},${y2}`, dur = '10s', begin = ((k % 5) * 2).toFixed(1) + 's';
   return `<g><title>${esc(tip)}</title><animateMotion path="${d}" dur="${dur}" begin="${begin}" repeatCount="indefinite" keyPoints="0;1;1" keyTimes="0;.3;1" calcMode="linear"/>` +
     `<animate attributeName="opacity" values="0;1;1;0;0" keyTimes="0;.03;.27;.3;1" dur="${dur}" begin="${begin}" repeatCount="indefinite"/>` +
-    `<rect x="-3" y="-2" width="7" height="5" fill="#FFFFFF"/><rect x="-2" y="-1" width="1" height="1" fill="#38BDF8"/><rect x="-1" y="0" width="3" height="1" fill="#38BDF8"/><rect x="2" y="-1" width="1" height="1" fill="#38BDF8"/></g>`;
+    `<rect x="-3.5" y="-2.5" width="8" height="6" fill="#FFFFFF"/><rect x="-2.5" y="-1.5" width="1" height="1" fill="#38BDF8"/><rect x="-1.5" y="-.5" width="3" height="1" fill="#38BDF8"/><rect x="1.5" y="-1.5" width="1" height="1" fill="#38BDF8"/>` +
+    (em ? `<text x=".5" y="3" text-anchor="middle" font-size="2.6">${esc(em)}</text>` : '') + `</g>`;
 }
 function pxTip(r) { return [r.p.emoji + ' ' + r.p.name, r.s && r.s.now, r.s && waitText(r.s) && 'מחכה לך: ' + waitText(r.s), r.s && pxEffortTip(r.s)].filter(Boolean).join('\n'); }
 // The name on a desk is short: the part before " · " ("Render · fast renders" is "Render"), or the part after it when
@@ -1586,10 +1587,14 @@ const pxRecentDate = d => { if (!d) return false; const t0 = new Date(); t0.setH
 // task's date, the oldest first, so a binder stays where it was (the owner, 16/11: "הפריטים בסיפריה זזים כל הזמן - מקשה למצוא שוב
 // פריט שנפתח"): reading it, or a new task, does not move it. A thing that waits for the owner is in his tray, not here. One marked
 // for him while the worker writes no waiting text stays here, so it is never lost; a done one comes here too. "see": the task has
-// an output to look at ("out").
+// an output to look at ("out"). Since 22/11 the shelf shows one binder per worker (pxShelf), so each task also carries "wi", its
+// worker's place in projects.json, and "stale": no change for more than 3 days, or no date.
 function pxLibrary(workers) {
   const tasks = [], done = [], t0 = new Date(); t0.setHours(0, 0, 0, 0);
+  let wn = -1;
   for (const r of workers) {
+    wn++;
+    const wi = typeof r.i === 'number' ? r.i : wn;
     if (!r.s) continue;
     const desk = pxTasks(r).desk, waits = !!waitText(r.s);
     for (const it of (Array.isArray(r.s.items) ? r.s.items : [])) {
@@ -1597,9 +1602,9 @@ function pxLibrary(workers) {
       if (!tx || o.later) continue;
       const d = pxItemDate(it), key = pxTaskKey(r.p, tx), see = Array.isArray(o.out) && o.out.length ? 1 : 0;
       if (pxHidden.has(key)) continue;
-      if (o.done) { if (pxRecentDate(d)) done.push({ p: r.p, t: tx, d, key, see, today: d >= t0 }); }
+      if (o.done) { if (pxRecentDate(d)) done.push({ p: r.p, t: tx, d, key, see, today: d >= t0, wi }); }
       else if (o.guy && waits) continue;
-      else if (!desk.includes(tx)) tasks.push({ p: r.p, t: tx, d, key, see });
+      else if (!desk.includes(tx)) tasks.push({ p: r.p, t: tx, d, key, see, wi, stale: !d || Math.floor((Date.now() - d) / 864e5) > 3 });
     }
   }
   const oldest = (a, b) => ((a.d ? +a.d : 0) - (b.d ? +b.d : 0)) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
@@ -1615,48 +1620,78 @@ function pxEvents(rows) {
 // A small plaque with a word on it, centered at cx, for the things on the walls (the mail room, the cork board, the bookshelf).
 const pxSign = (cx, y, word, w, bg = '#2A2F45', fg = '#FFD23F') => `<rect x="${cx - w / 2}" y="${y}" width="${w}" height="6" fill="${bg}"/><rect x="${cx - w / 2}" y="${y + 5}" width="${w}" height="1" fill="#000000" fill-opacity=".25"/>` +
   `<text x="${cx}" y="${y + 4.4}" text-anchor="middle" font-family="Heebo" font-size="3.8" font-weight="700" fill="${fg}">${word}</text>`;
-// The mail room on the wall: pigeonholes, with an envelope for each open request between workers (the stripe in the
-// color of the worker it is for). The envelopes that fly to a desk leave from here. A click opens the mail.
+// The mail room on the wall: pigeonholes, with an envelope for each open request between workers: the stripe in the color of the
+// worker it is for, and the emoji of the worker that sent it (the owner, 22/11: "אפשר שבדואר מעטפה תכיל את לוגו השיחה שממנה
+// יצאה. תגדיל קצת את התיבה והמעטפות": 30 wide since then, was 24). The envelopes that fly to a desk leave from here. A click opens the mail.
 function pxMailRack(x, y, reqs, byId) {
-  const old = reqs.filter(q => reqOld(q.q)).length;
+  const old = reqs.filter(q => reqOld(q.q)).length, RW = 30;
   let s = `<g class="who" data-act="open:mail"><title>${esc('חדר הדואר: ' + (reqs.length ? reqs.length + ' בקשות בין עובדים' + (old ? ', ' + old + ' ישנות (בצהוב)' : '') + ' · לחיצה' : 'אין בקשות בין עובדים'))}</title>` +
-    pxSign(x + 12, y - 8, 'דואר', 20, '#1D4E89', '#FFFFFF') + `<rect x="${x}" y="${y}" width="24" height="24" fill="#6B4429"/><rect x="${x}" y="${y}" width="24" height="1" fill="#8B5E3C"/>`;
+    pxSign(x + RW / 2, y - 8, 'דואר', 20, '#1D4E89', '#FFFFFF') + `<rect x="${x}" y="${y}" width="${RW}" height="${RW}" fill="#6B4429"/><rect x="${x}" y="${y}" width="${RW}" height="1" fill="#8B5E3C"/>`;
   for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
-    const k = r * 4 + c, cx = x + 1 + c * 5.75, cy = y + 1.5 + r * 5.6;
-    s += `<rect x="${cx}" y="${cy}" width="4.75" height="4.6" fill="#3A2414"/>`;
+    const k = r * 4 + c, cx = +(x + 1 + c * 7.1).toFixed(2), cy = +(y + 1.6 + r * 7.05).toFixed(2);
+    s += `<rect x="${cx}" y="${cy}" width="6.6" height="6.4" fill="#3A2414"/>`;
     const q = reqs[k];
-    if (q) s += `<rect x="${cx}" y="${cy + 1}" width="4.75" height="3.6" fill="${reqOld(q.q) ? '#FDE68A' : '#FFFFFF'}"/><rect x="${cx}" y="${cy + 1}" width="4.75" height="1" fill="${esc(pxTie(byId[q.q.to] || { emoji: '', color: '#38BDF8' }))}"/>`;
+    if (q) { const to = byId[q.q.to] || { emoji: '', color: '#38BDF8' };
+      s += `<g><title>${esc((q.from.emoji || '') + ' ' + q.from.name + ' ← ' + ((to.emoji || '') + ' ' + (to.name || q.q.to)).trim() + ': ' + q.q.what)}</title>` +
+        `<rect x="${cx}" y="${cy + 1.2}" width="6.6" height="5.2" fill="${reqOld(q.q) ? '#FDE68A' : '#FFFFFF'}"/><rect x="${cx}" y="${cy + 1.2}" width="6.6" height="1" fill="${esc(pxTie(to))}"/>` +
+        `<path d="M${cx + .3},${cy + 2.3} l3,1.6 l3,-1.6" stroke="#C9CED6" stroke-width=".35" fill="none"/>` +
+        `<text x="${cx + 3.3}" y="${cy + 5.9}" text-anchor="middle" font-size="2.8">${esc(q.from.emoji || '')}</text></g>`; }
   }
   return s + `</g>`;
 }
-// The library in the owner's room, one binder per task in the worker's color, 6 to a shelf on 7 shelves (bigger since 16/11, the
-// owner: "תמצא דרך להגדיל את הספריה"): on the upper four the open tasks that are not on a desk now; on the lower three, with a green
-// tick, what was finished today. The order is fixed, the oldest first. Where there is no room, the oldest go under a "+N" in a
-// section's first place, so the newest are always seen. A red dot: not read yet; a blue corner with a white triangle: there is
-// something to see in it. A click on a binder opens its task with the output; a click elsewhere on the shelf opens the whole list,
-// yesterday's too. put(key, place, x, y, p, svg) draws a binder, and flies it if it moved.
+// The library in the owner's room, 50 wide, 7 shelves (the owner, 22/11: "הסיפרייה קצת מבולגנת לי... יש יותר מדי פריטים בסיפריה
+// וזה הפך להיות לא יעיל", and "קלסר לכל עובד - ככל שיש יותר משימות פתוחות קלסר גדול יותר (עד גבול מסויים)"):
+// - The upper four: one binder per worker, for its open tasks of the last 3 days that are not on its desk, in the order of
+//   projects.json, so a binder never moves when another one is read. The more tasks, the wider the binder, up to 5; the number is on it.
+// - The next two, "מוכן לראות": what was finished today or yesterday and has an output to look at ("out"), with a green tick.
+// - The bottom one: the box "ישן", only a number: open tasks that did not change for more than 3 days, or have no date.
+// A red dot: a task in it the owner did not read yet; a blue corner: there is something to see. A click on a worker's binder
+// opens its tasks, on the box the old ones, elsewhere the whole list by worker. Each task keeps its own place for the flights
+// (put(key, place, x, y, p, svg, o)): one that leaves a desk flies to its worker's binder, or to the box.
 function pxShelf(x, y0, done, tasks, put) {
   tasks = tasks || []; put = put || ((k, pl, a, b, p, s) => s);
-  // 10 to a shelf since 16/11 (the owner: "את היומן במשרד המנהל תעיף ותגדיל את הסיפריה"): 70 places, 50 wide.
-  const today = done.filter(d => d.today), COL = 10, PITCH = 4.65, ROW = 8.6, OPEN_R = 4, DONE_R = 3, y = y0 + 7, H = (OPEN_R + DONE_R) * ROW + 1, BW = 50;
-  const unread = tasks.concat(today).filter(tk => !pxRead.has(tk.key)).length;
-  let s = `<g class="who" data-act="open:shelf"><title>${esc('הספרייה: ' + (tasks.length ? tasks.length + ' משימות פתוחות' : 'אין משימות פתוחות') + ' · ' + (today.length ? today.length + ' נגמרו היום' : 'עוד לא נגמר כלום היום') + (unread ? ' · ' + unread + ' לא נקראו' : '') + ' · לחיצה: כל הרשימה, גם של אתמול')}</title>` + pxSign(x + BW / 2, y0, 'ספרייה', 28) +
-    `<rect x="${x}" y="${y}" width="${BW}" height="${H}" fill="#7A5236"/>` + Array.from({ length: OPEN_R + DONE_R }, (_, i) => `<rect x="${x + 1}" y="${y + 1 + i * ROW}" width="${BW - 2}" height="7.6" fill="#4A2E1A"/>`).join('');
-  // An open task older than 3 days (or with no date) looks faded, so the stale ones stand out (the owner, 16/11: "תשאיר כמו היום
-  // ותוסיף ג").
-  const ageOf = tk => tk.d ? Math.floor((Date.now() - tk.d) / 864e5) : null;
-  const one = (tk, bx, by, fin) => { const age = fin ? 0 : ageOf(tk), old = !fin && (age == null || age > 3);
-    return `<g class="who" data-act="open:task:${esc(tk.key)}"${old ? ' opacity=".45"' : ''}><title>${esc((tk.p.emoji || '') + ' ' + tk.p.name + (fin ? ' · נגמר: ' : ': ') + tk.t + (tk.see ? '\nיש בו מה לראות' : '') + (old ? (age == null ? '\nבלי תאריך' : '\nפתוחה כבר ' + age + ' ימים') : '') + '\nלחיצה: דף המשימה, עם התוצר')}</title>` +
-    pxBinder(bx, by, tk.p, 7) + (fin ? pxTick(bx, by) : '') + (tk.see ? pxSee(bx, by) : '') + (pxRead.has(tk.key) ? '' : pxUnread(bx, by)) + `</g>`; };
-  // One section: its places in order. When there is no room, its first place shows "+N" (the oldest), and they fly to it.
-  const section = (list, row0, rows, place, fin) => {
-    const cap = rows * COL, over = list.length > cap ? list.length - (cap - 1) : 0, at = j => ({ bx: +(x + 1.6 + (j % COL) * PITCH).toFixed(2), by: +(y + 1.6 + (row0 + Math.floor(j / COL)) * ROW).toFixed(2) });
-    list.forEach((tk, k) => { const { bx, by } = at(over ? Math.max(0, k - over + 1) : k);
-      s += put(tk.key, place, bx, by, tk.p, !over || k >= over ? one(tk, bx, by, fin) : ''); });
-    if (over) { const { bx, by } = at(0); s += `<text x="${bx + 2}" y="${by + 4.6}" text-anchor="middle" font-family="Heebo" font-size="2.6" font-weight="800" fill="#FFFFFF">+${over}</text>`; }
-  };
-  section(tasks, 0, OPEN_R, 'lib', false);
-  section(today, OPEN_R, DONE_R, 'done', true);
+  const COL = 10, PITCH = 4.65, ROW = 8.6, OPEN_R = 4, SEE_R = 2, y = y0 + 7, H = 7 * ROW + 1, BW = 50;
+  const fresh = tasks.filter(t => !t.stale), stale = tasks.filter(t => t.stale), see = done.filter(d => d.see);
+  const groups = [], gi = {};
+  for (const t of fresh) { const id = t.p.id || t.p.name; if (!gi[id]) groups.push(gi[id] = { id, p: t.p, wi: t.wi, list: [] }); gi[id].list.push(t); }
+  groups.sort((a, b) => a.wi - b.wi);
+  const unread = fresh.concat(see).filter(tk => !pxRead.has(tk.key)).length;
+  let s = `<g class="who" data-act="open:shelf"><title>${esc('הספרייה: ' + (groups.length ? groups.length + ' עובדים עם ' + fresh.length + ' משימות מ־3 הימים האחרונים' : 'אין משימות פתוחות מ־3 הימים האחרונים') + ' · מוכן לראות: ' + see.length + ' · ישן: ' + stale.length + (unread ? ' · ' + unread + ' לא נקראו' : '') + ' · לחיצה: כל הרשימה')}</title>` + pxSign(x + BW / 2, y0, 'ספרייה', 28) +
+    `<rect x="${x}" y="${y}" width="${BW}" height="${H}" fill="#7A5236"/>` + Array.from({ length: 7 }, (_, i) => `<rect x="${x + 1}" y="${y + 1 + i * ROW}" width="${BW - 2}" height="7.6" fill="#4A2E1A"/>`).join('');
+  // A worker's binder: 4 wide for one task, 2 more for each other one, up to 12 (5 tasks). The sticker with the emoji in the
+  // middle, the number under it from 2 tasks.
+  const wOf = n => Math.min(4 + (n - 1) * 2, 12);
+  const big = (g, bx, by, w) => { const n = g.list.length, c = pxTie(g.p), un = g.list.some(t => !pxRead.has(t.key)), sx = +(bx + (w - 3) / 2).toFixed(2);
+    return `<g class="who" data-act="open:lib:${esc(g.id)}"><title>${esc((g.p.emoji || '') + ' ' + g.p.name + ': ' + n + (n === 1 ? ' משימה פתוחה' : ' משימות פתוחות') + '\n' + g.list.slice().reverse().slice(0, 5).map(t => '· ' + t.t.slice(0, 80)).join('\n') + (n > 5 ? '\n…' : '') + '\nלחיצה: המשימות של ' + g.p.name)}</title>` +
+      `<rect x="${bx}" y="${by}" width="${w}" height="7" fill="${c}"/><rect x="${bx}" y="${by}" width="${w}" height="1" fill="#000000" fill-opacity=".2"/>` +
+      (w >= 7 ? `<rect x="${bx + 1}" y="${by + 1}" width=".5" height="6" fill="#000000" fill-opacity=".12"/><rect x="${+(bx + w - 1.5).toFixed(2)}" y="${by + 1}" width=".5" height="6" fill="#000000" fill-opacity=".12"/>` : '') +
+      `<rect x="${sx}" y="${by + 1.5}" width="3" height="3" fill="#FFFFFF"/><text x="${sx + 1.5}" y="${by + 3.9}" text-anchor="middle" font-size="2.3">${esc(g.p.emoji || '')}</text>` +
+      (n > 1 ? `<text x="${+(bx + w / 2).toFixed(2)}" y="${by + 6.6}" text-anchor="middle" font-family="Heebo" font-size="2.1" font-weight="800" fill="#FFFFFF" stroke="#000000" stroke-width=".35" paint-order="stroke">${n}</text>` : '') +
+      (un ? pxUnread(+(bx + w - 4).toFixed(2), by) : '') + `</g>`; };
+  // The binders in rows, left to right, the next row when one does not fit. What has no room is counted under "+N" at the end.
+  let bx = x + 1.6, row = 0, over = 0;
+  for (const g of groups) {
+    const w = wOf(g.list.length);
+    if (bx + w > x + BW - 1.4) { row++; bx = x + 1.6; }
+    if (row >= OPEN_R) { over++; continue; }
+    const by = +(y + 1.6 + row * ROW).toFixed(2);
+    s += big(g, +bx.toFixed(2), by, w);
+    g.list.forEach(t => { put(t.key, 'lib', +(bx + w / 2 - 2).toFixed(2), by, t.p, '', { noSlide: true }); });
+    bx += w + .8;
+  }
+  if (over) s += `<text x="${x + BW - 3}" y="${y + 1.6 + (OPEN_R - 1) * ROW + 4.6}" text-anchor="middle" font-family="Heebo" font-size="2.6" font-weight="800" fill="#FFFFFF">+${over}</text>`;
+  // "מוכן לראות": a book per finished task with an output, the oldest first; where there is no room, "+N" in the first place.
+  const one = (tk, px, py) => `<g class="who" data-act="open:task:${esc(tk.key)}"><title>${esc((tk.p.emoji || '') + ' ' + tk.p.name + ' · נגמר: ' + tk.t + '\nיש בו מה לראות\nלחיצה: דף המשימה, עם התוצר')}</title>` +
+    pxBinder(px, py, tk.p, 7) + pxTick(px, py) + pxSee(px, py) + (pxRead.has(tk.key) ? '' : pxUnread(px, py)) + `</g>`;
+  const cap = SEE_R * COL, sOver = see.length > cap ? see.length - (cap - 1) : 0, at = j => ({ px: +(x + 1.6 + (j % COL) * PITCH).toFixed(2), py: +(y + 1.6 + (OPEN_R + Math.floor(j / COL)) * ROW).toFixed(2) });
+  see.forEach((tk, k) => { const { px, py } = at(sOver ? Math.max(0, k - sOver + 1) : k); s += put(tk.key, 'done', px, py, tk.p, !sOver || k >= sOver ? one(tk, px, py) : ''); });
+  if (sOver) { const { px, py } = at(0); s += `<text x="${px + 2}" y="${py + 4.6}" text-anchor="middle" font-family="Heebo" font-size="2.6" font-weight="800" fill="#FFFFFF">+${sOver}</text>`; }
+  // The box "ישן" on the bottom shelf: a cardboard box with the number on it. With nothing old, no box.
+  const kx = x + 1.6, ky = +(y + 1.6 + (OPEN_R + SEE_R) * ROW).toFixed(2);
+  stale.forEach(t => { put(t.key, 'old', kx + 5, ky, t.p, '', { noSlide: true }); });
+  if (stale.length) s += `<g class="who" data-act="open:old"><title>${esc('ישן: ' + stale.length + (stale.length === 1 ? ' משימה פתוחה' : ' משימות פתוחות') + ' שלא זזו יותר מ־3 ימים\nלחיצה: הרשימה')}</title>` +
+    `<rect x="${kx}" y="${ky + .6}" width="14" height="6.4" fill="#B7865A"/><rect x="${kx}" y="${ky + .6}" width="14" height="1.2" fill="#D2A679"/><rect x="${kx + 6.6}" y="${ky + .6}" width=".8" height="1.2" fill="#8A6240"/>` +
+    `<text x="${kx + 7}" y="${ky + 5.9}" text-anchor="middle" font-family="Heebo" font-size="2.4" font-weight="800" fill="#3B2A1A">ישן ${stale.length}</text></g>`;
   return s + `</g>`;
 }
 // The day clock on the owner's wall. It took the whiteboard's place (the owner, 16/11: "מה נותן הלוח הלבן במשרד של המנהל? מרגיש
@@ -1889,15 +1924,24 @@ function pxCloseup(kind, c) {
     body = `<div class="col"><h3 class="blue">היום · ${pxClockHM(now)}</h3><p class="now">${act.length ? 'עכשיו: ' + esc(act.map(w => w.text).join(' · ')) : 'עכשיו אין מגבלה'}</p>` +
       `<h3>השעות הקבועות</h3>` + (wins.length ? `<ul>${wins.map(w => `<li${pxWinNow(w, nm) ? ' class="ask"' : ''}><span style="color:${esc(w.color || '#9CA3AF')}">▮</span> ${esc(w.from)}–${esc(w.to)}: ${esc(w.text)}</li>`).join('')}</ul>` : '<p>אין שעות קבועות.</p>') +
       `<h3>מה נקבע להיום</h3>` + (sched.length ? `<ul>${sched.map(e => `<li${e.d < now ? ' style="opacity:.6"' : ''}>${pxClockHM(e.d)} · ${whoId(e.id)}: ${esc(e.text)}</li>`).join('')}</ul>` : '<p>לא נקבע כלום להיום.</p>') + `</div>`;
-  } else if (kind === 'shelf') {
+  } else if (kind === 'shelf' || kind === 'old' || kind.startsWith('lib:')) {
+    // The library's list (22/11): by worker, in the order of projects.json; in each, the new ones first, the old ones after them.
+    // "lib:<id>": one worker's binder. "old": the box, only what did not change for more than 3 days.
     cls = 'cu-board';
-    const tks = c.tasks || [], rd = d => pxRead.has(d.key), unread = tks.filter(d => !rd(d)).length;
-    const li = (d, fin) => `<li data-act="open:task:${esc(d.key)}" style="cursor:pointer${rd(d) ? ';opacity:.6' : ';font-weight:700'}" title="לחיצה: דף המשימה, עם התוצר">${fin ? '<span style="color:#16A34A">✓</span> ' : ''}<span style="color:${esc(pxTie(d.p))}">▮</span> ${who(d.p)}: ${esc(d.t)}${d.see ? ' <span style="color:#60A5FA" title="יש בו מה לראות">▶</span>' : ''}${rd(d) ? '' : ' <span style="color:#EF4444">●</span>'} <button class="cu-link" data-act="hide:${esc(d.key)}" title="להוריד מהספרייה">✕</button></li>`;
-    const td = c.done.filter(d => d.today), yd = c.done.filter(d => !d.today);
-    body = `<div class="col"><h3 class="blue">משימות פתוחות · ${tks.length}${unread ? ' · ' + unread + ' לא נקראו' : ''}</h3>` + (tks.length ? `<ul class="done">${tks.map(d => li(d, false)).join('')}</ul>` : '<p>אין משימות פתוחות.</p>') +
-      `<h3 class="green">נגמר היום · ${td.length}</h3>` + (td.length ? `<ul class="done">${td.map(d => li(d, true)).join('')}</ul>` : '<p>עוד לא נגמר כלום היום.</p>') +
-      (yd.length ? `<h3>נגמר אתמול · ${yd.length}</h3><ul class="done">${yd.map(d => li(d, true)).join('')}</ul>` : '') +
-      `<p>הסדר קבוע, מהישן לחדש. לחיצה על משימה פותחת את הדף שלה, עם התוצר, ומסמנת שקראת. ▶: יש בה מה לראות. ✕: להוריד מהספרייה.${pxHidden.size ? ` <button class="cu-link" data-act="unhide-all">הורדו ${pxHidden.size} · להחזיר הכול</button>` : ''}</p></div>`;
+    const only = kind.startsWith('lib:') ? kind.slice(4) : null, oldOnly = kind === 'old', idOf = d => d.p.id || d.p.name;
+    const tks = (c.tasks || []).filter(d => (!only || idOf(d) === only) && (!oldOnly || d.stale)), rd = d => pxRead.has(d.key), unread = tks.filter(d => !rd(d)).length;
+    const li = (d, fin) => `<li data-act="open:task:${esc(d.key)}" style="cursor:pointer${rd(d) ? ';opacity:.6' : ';font-weight:700'}" title="לחיצה: דף המשימה, עם התוצר">${fin ? '<span style="color:#16A34A">✓</span> ' : ''}${esc(d.t)}${d.see ? ' <span style="color:#60A5FA" title="יש בו מה לראות">▶</span>' : ''}${!fin && d.stale && !oldOnly ? ' <span style="color:#B7865A">· ישן</span>' : ''}${rd(d) ? '' : ' <span style="color:#EF4444">●</span>'} <button class="cu-link" data-act="hide:${esc(d.key)}" title="להוריד מהספרייה">✕</button></li>`;
+    const newest = (a, b) => (b.d ? +b.d : 0) - (a.d ? +a.d : 0);
+    const byW = list => { const gs = [], gi = {}; for (const d of list) { const id = idOf(d); if (!gi[id]) gs.push(gi[id] = { p: d.p, wi: d.wi, list: [] }); gi[id].list.push(d); } return gs.sort((a, b) => a.wi - b.wi); };
+    const grp = (g, fin) => `<h4 style="margin:.7em 0 .2em"><span style="color:${esc(pxTie(g.p))}">▮</span> ${who(g.p)} · ${g.list.length}</h4><ul class="done">${(fin ? g.list : g.list.filter(d => !d.stale).sort(newest).concat(g.list.filter(d => d.stale).sort(newest))).map(d => li(d, fin)).join('')}</ul>`;
+    const dn = oldOnly ? [] : (c.done || []).filter(d => !only || idOf(d) === only), seeL = dn.filter(d => d.see), rest = dn.filter(d => !d.see);
+    const name = only ? (c.rowsById[only] ? who(c.rowsById[only].p) : esc(only)) : '';
+    body = `<div class="col"><h3 class="blue">${only ? name + ' · משימות פתוחות' : oldOnly ? 'ישן · לא זזו יותר מ־3 ימים' : 'משימות פתוחות'} · ${tks.length}${unread ? ' · ' + unread + ' לא נקראו' : ''}</h3>` +
+      (tks.length ? (only ? `<ul class="done">${tks.filter(d => !d.stale).sort(newest).concat(tks.filter(d => d.stale).sort(newest)).map(d => li(d, false)).join('')}</ul>` : byW(tks).map(g => grp(g, false)).join('')) : '<p>אין משימות פתוחות.</p>') +
+      (oldOnly ? '' : `<h3 class="green">מוכן לראות · ${seeL.length}</h3>` + (seeL.length ? (only ? `<ul class="done">${seeL.map(d => li(d, true)).join('')}</ul>` : byW(seeL).map(g => grp(g, true)).join('')) : '<p>אין עכשיו.</p>') +
+        (rest.length ? `<h3>נגמר, בלי תוצר · ${rest.length}</h3>` + (only ? `<ul class="done">${rest.map(d => li(d, true)).join('')}</ul>` : byW(rest).map(g => grp(g, true)).join('')) : '')) +
+      `<p>קודם החדש · ישן: לא זז 3 ימים · ▶ יש תוצר · ✕ להוריד${pxHidden.size ? ` · <button class="cu-link" data-act="unhide-all">הורדו ${pxHidden.size} · להחזיר הכול</button>` : ''}</p>` +
+      (only || oldOnly ? `<div class="foot"><button class="cu-link" data-act="open:shelf">כל הספרייה</button>${only ? ` · <button class="cu-link" data-act="open:w:${esc(only)}">החלון של העובד</button>` : ''}</div>` : '') + `</div>`;
   } else if (kind === 'mail') {
     cls = 'cu-cab';
     body = `<h3>חדר הדואר · בקשות בין עובדים</h3>` + (c.reqs.length ? `<ul>${c.reqs.map(({ from, q }) => `<li>${who(from)} ← ${esc(q.to)}: ${esc(q.what)}${reqTag(q) ? ` <span class="old">⏳ ${esc(reqTag(q))}</span>` : ''}</li>`).join('')}</ul>` : '<p>אין בקשות פתוחות.</p>');
@@ -1915,8 +1959,8 @@ function pxCloseup(kind, c) {
     cls = 'cu-help';
     body = `<h3>מה כל דבר במשרד אומר</h3><ul>` + [
       ['עובד ליד השולחן ומקליד', 'עובד עכשיו'], ['על כיסאות ההמתנה ליד החדר שלך', 'מחכה לך'], ['בפינת הקפה', 'לא עובד עכשיו. שעון חול: ממתין, כלומר מחכה למשהו אחר ולא לך. ✓: סיים. כשאין כיסא פנוי, עומדים בזוגות ומדברים'],
-      ['המגש על השולחן שלך', 'קלסר לכל שאלה שמחכה לך. לחיצה על השולחן פותחת את המגש, ולחיצה על שאלה פותחת אותה עם כפתורי תשובה. התשובה נשמרת בתיקייה של עזרא, והוא מעביר אותה לעובד תוך 30 דקות. אישור להתקין, למחוק או לאתחל נשאר בשיחה של העובד'], ['קלסר, בצבע של העובד', 'משימה, קלסר אחד לכל משימה. פתוח על השולחן: עובדים עליה עכשיו. בספרייה: מחכה לתורה. במגש שלך: מחכה לך. בשלושת המדפים התחתונים של הספרייה, עם ✓ ירוק: נגמרה היום. כשהמקום שלה משתנה, הקלסר עף לשם'], ['טלפון אדום מתנדנד', 'משהו חשוב, כמו "לא לאתחל"'], 
-      ['פתק על לוח השעם', 'דבר שנדחה, בצבע של העובד: נייר בגוון בהיר של הצבע שלו, ופס בצבע עצמו למעלה'], ['שעון היום בחדר שלך', 'שעון של 24 שעות: השעות הקבועות שלך בצבע על השעון, נקודה בצבע של העובד לכל דבר שנקבע להיום, ומחוג של עכשיו. השלט מתחת: מה בתוקף עכשיו. לחיצה: היום'], ['הספרייה בחדר שלך', 'בארבעת המדפים העליונים, קלסר לכל משימה פתוחה שלא על השולחן, עד שהיא נגמרת. בשלושת התחתונים, עם ✓: מה שנגמר היום. הסדר קבוע, מהישן לחדש, וקלסר לא זז כשקוראים אותו. כשאין מקום, הישנים מתחת ל־"+N". נקודה אדומה: עוד לא קראת. פינה כחולה: יש בו מה לראות. קלסר דהוי: משימה פתוחה כבר יותר מ־3 ימים. לחיצה על קלסר פותחת את הדף שלו, ולחיצה על הספרייה פותחת את כל הרשימה, גם של אתמול'], ['הארון', 'קבצים משותפים; אדום כשיש התנגשות'], ['תאי הדואר ומעטפה כחולה', 'בקשה בין עובדים'],
+      ['המגש על השולחן שלך', 'קלסר לכל שאלה שמחכה לך. לחיצה על השולחן פותחת את המגש, ולחיצה על שאלה פותחת אותה עם כפתורי תשובה. התשובה נשמרת בתיקייה של עזרא, והוא מעביר אותה לעובד תוך 30 דקות. אישור להתקין, למחוק או לאתחל נשאר בשיחה של העובד'], ['קלסר, בצבע של העובד', 'משימה. פתוח על השולחן: עובדים עליה עכשיו. במגש שלך: מחכה לך. בספרייה: קלסר אחד לכל עובד, עם המשימות הפתוחות שלו. כשהמקום של משימה משתנה, קלסר קטן עף לשם'], ['טלפון אדום מתנדנד', 'משהו חשוב, כמו "לא לאתחל"'], 
+      ['פתק על לוח השעם', 'דבר שנדחה, בצבע של העובד: נייר בגוון בהיר של הצבע שלו, ופס בצבע עצמו למעלה'], ['שעון היום בחדר שלך', 'שעון של 24 שעות: השעות הקבועות שלך בצבע על השעון, נקודה בצבע של העובד לכל דבר שנקבע להיום, ומחוג של עכשיו. השלט מתחת: מה בתוקף עכשיו. לחיצה: היום'], ['הספרייה בחדר שלך', 'למעלה: קלסר לכל עובד, עם המשימות הפתוחות שלו מ־3 הימים האחרונים. יותר משימות, קלסר רחב יותר (עד 5), והמספר עליו. מתחת, עם ✓ ופינה כחולה: מוכן לראות, מה שנגמר היום או אתמול ויש לו תוצר. למטה: הארגז ישן, משימות שלא זזו יותר מ־3 ימים. נקודה אדומה: יש משימה שעוד לא קראת. לחיצה על קלסר: המשימות של העובד. על הארגז: הישנות. על הספרייה: הכול'], ['הארון', 'קבצים משותפים; אדום כשיש התנגשות'], ['תאי הדואר ומעטפה כחולה', 'בקשה בין עובדים. על המעטפה הסמל של מי ששלח, והפס בצבע של מי שהיא בשבילו. צהובה: לא זזה יומיים'],
       ['הטלוויזיה', 'העדכונים האחרונים'], ['קנקן קפה / קנקן תה', 'יום / שבוע: מה שנשאר מהחלק של היום / מהמכסה השבועית'], ['החלון והשעון הדיגיטלי', 'מזג האוויר, השעה והתאריך בעיר שלך'], ['מפת המשרד', 'המקרא הזה'], ['שעון הנוכחות', 'כמה כל עובד עבד היום'], ['המעלית', 'המחסן של הארכיון. עובד חדש יוצא ממנה בצלצול, ומי שעובר לארכיון נכנס אליה'], ['צלילים', 'לכל אירוע צליל: מתיישב לעבוד (הקלדה), הולך לקפה (כוסות), מתיישב על הספסל (כיסא), משהו חדש מחכה לך (צליל), קלסר עף (משב), משימה נגמרה (שלושה צלילים עולים), בקשה בין עובדים (נייר), פתק חדש על לוח השעם (נעץ), הטלפון האדום (צלצול), עזרא דופק בדלת (דפיקות), הגיעה שעה שנקבעה להיום (פעמון), המעלית (צלצול) ומי שעובר לארכיון (חצוצרה עצובה). הכפתור למעלה מכבה ומדליק']
     ].map(([a, b]) => `<li><b>${esc(a)}</b>: ${esc(b)}</li>`).join('') + `</ul>` +
       // Every sound can be heard here (the owner, 16/11: "מה עם הצלילים? מה הוסף?").
@@ -1956,7 +2000,8 @@ function officeScene(workers, ezra, forGuy, sList, reqs, later, usage, events, a
     binderAt[key] = { place, x: ax, y: ay };
     // Nothing jumps (the owner, 16/11: "שום פריט הכל בתזוזה"): a binder that moved to another place on the same shelf (one
     // before it left) slides there in 0.8 s, quietly; one that changed place flies.
-    const was = pxBinderAt[key], moved = !!was && was.place === place && (Math.abs(was.x - ax) > .3 || Math.abs(was.y - ay) > .3);
+    // o.noSlide: a task inside a worker's binder or the box, drawn by its binder; it flies there, but never slides on its own.
+    const was = pxBinderAt[key], moved = !o.noSlide && !!was && was.place === place && (Math.abs(was.x - ax) > .3 || Math.abs(was.y - ay) > .3);
     const from = was && (was.place !== place || moved) ? was : !was && !firstDraw && o.from ? o.from : null;
     if (from) { const d = moved ? .8 : 1.8, t0 = +Math.max(T + .3, o.land != null ? o.land - d : 0).toFixed(2);
       pxFlights[key] = { p, place, a: { x: from.x, y: from.y }, t0, d, lift: moved ? 3 : 16, t1: +(t0 + d).toFixed(2) };
@@ -2150,8 +2195,8 @@ function officeScene(workers, ezra, forGuy, sList, reqs, later, usage, events, a
   const WALL = 50, CX = 216, CY = H - 26, LX = 112, byIdAll = Object.fromEntries(workers.map(r => [r.p.id, r.p]));
   // The wall is laid out over its whole width, up to the lift: window, office map, cork board, clock, mail room. On a wide
   // office the window and the cork board grow, and the gaps between the things grow too.
-  const WAVAIL = LX + RX - 6 - 8, WBIG = WAVAIL >= 190, WW = WBIG ? 34 : 22, CBW = WBIG ? Math.min(96, WAVAIL - 134) : Math.max(30, WAVAIL - 96), CBH = WBIG ? 30 : 22;
-  const WWID = [WW, 20, CBW, 18, 24], WGAP = Math.max(2, (WAVAIL - WWID.reduce((s, v) => s + v, 0)) / 5);
+  const WAVAIL = LX + RX - 6 - 8, WBIG = WAVAIL >= 190, WW = WBIG ? 34 : 22, CBW = WBIG ? Math.min(96, WAVAIL - 140) : Math.max(30, WAVAIL - 102), CBH = WBIG ? 30 : 22;
+  const WWID = [WW, 20, CBW, 18, 30], WGAP = Math.max(2, (WAVAIL - WWID.reduce((s, v) => s + v, 0)) / 5);
   const WX = []; { let x = 8; for (const w of WWID) { WX.push(Math.round(x)); x += w + WGAP; } }
   if (ezra) {
     // His spot is left of the door, a little away from the waiting chairs.
@@ -2307,8 +2352,8 @@ function officeScene(workers, ezra, forGuy, sList, reqs, later, usage, events, a
     pot(18, uw, '#C9822B', 'התה של המשרד: שבוע\nנשאר % מהמכסה השבועית (כל המודלים).\nכשהקנקן מתרוקן, כל העובדים עוצרים עד תחילת השבוע הבא.', true, 'שבוע');
   reqs.slice(0, 6).forEach(({ from, q }, k) => {
     // Each envelope leaves the mail room on the wall and flies to the desk of the worker it is for.
-    const a = { x: WX[4] + 12, y: 27 }, b = pos[q.to];
-    if (a && b && a !== b) fly += pxEnv(a.x, a.y, b.x, b.y, k, 'בקשה מ־' + from.emoji + ' ' + from.name + ': ' + q.what);
+    const a = { x: WX[4] + 15, y: 30 }, b = pos[q.to];
+    if (a && b && a !== b) fly += pxEnv(a.x, a.y, b.x, b.y, k, 'בקשה מ־' + from.emoji + ' ' + from.name + ': ' + q.what, from.emoji);
   });
   // The coffee corner: a sofa, the counter and the coffee machine; whoever is not working hangs out here.
   // The coffee corner has the same floor as the rest of the office.
@@ -2393,7 +2438,7 @@ function officeScene(workers, ezra, forGuy, sList, reqs, later, usage, events, a
   const es = ezra && ezra.s, ezNotes = es ? (waitText(es) ? [{ t: waitText(es), ask: true }] : []).concat((es.items || []).filter(i => i && i.text && !i.guy).map(i => ({ t: String(i.text) }))) : [];
   let room = `<rect x="144" y="0" width="96" height="86" fill="url(#pxcarpet)"/>` +
     // The day clock in the room's corner (the whiteboard's place first, the calendar's since 16/11); the library beside it, wide.
-    pxDayClock(146, 4, pxToday(ezra), byIdAll) + pxShelf(186, 4, lib.done, lib.tasks, (key, place, x, y, p, svg) => put(key, place, x + RX, y, p, svg)) +
+    pxDayClock(146, 4, pxToday(ezra), byIdAll) + pxShelf(186, 4, lib.done, lib.tasks, (key, place, x, y, p, svg, o) => put(key, place, x + RX, y, p, svg, o)) +
     // The desk, the chair, the tray and the phone sit low on the left of the room, under the clock (since 16/11, so the library
     // can be wide).
     `<g transform="translate(-40 30)">` +
@@ -2505,7 +2550,7 @@ function officeScene(workers, ezra, forGuy, sList, reqs, later, usage, events, a
   const d0 = workers.length ? desk[workers[0].p.id] : null;
   const help = `<g class="pxhelp" style="display:none;pointer-events:none"><rect x="0" y="0" width="${W}" height="${H}" fill="#0B0A12" fill-opacity=".5"/>` +
     lab(WX[0] + WW / 2, 44, 'מזג האוויר אצלך') + lab(WX[1] + 10, 53, 'עזרא: ההסבר הזה') + lab(WX[2] + CBW / 2, 44, 'נדחו: פתק לכל דבר') +
-    lab(WX[3] + 9, 53, 'השעה והתאריך אצלך') + lab(WX[4] + 12, 44, 'בקשות בין עובדים') + lab(LX + 13 + RX, 53, 'מעלית: הארכיון') +
+    lab(WX[3] + 9, 53, 'השעה והתאריך אצלך') + lab(WX[4] + 15, 48, 'בקשות בין עובדים') + lab(LX + 13 + RX, 53, 'מעלית: הארכיון') +
     (d0 ? lab(d0.x + 9, d0.y + 30, 'ליד השולחן: עובד · קלסר פתוח = המשימה של עכשיו') : '') +
     (d0 ? lab(d0.x + 9, d0.y + 37.5, 'כוסות קפה: רמת המאמץ · קאפקייק: Ultracode') : '') +
     lab(19, K - 19, 'עדכונים אחרונים') + lab(21, K + 37, 'נשאר מהמכסה: קפה יום, תה שבוע') + lab(124, K + 3, 'פינת הקפה: לא עובדים עכשיו') +
