@@ -244,6 +244,20 @@
   .cu .out img.pxm { width: auto; max-height: 50vh; }
   .cu .out iframe.pxm { width: 100%; height: 60vh; background: #FFFFFF; }
   .cu .out .pxm-bad { margin-top: 4px; font-size: 14px; color: #8A3B12; }
+  .cu .out .pxt { margin-top: 6px; max-height: 50vh; overflow: auto; background: #FFFFFF; border: 2px solid #0b0a14; border-radius: 4px; padding: 8px 12px; font-size: 14px; line-height: 1.5; color: #1E293B; }
+  .cu .out .pxt h5 { margin: 10px 0 4px; font-size: 15px; } .cu .out .pxt p { margin: 4px 0; } .cu .out .pxt ul { gap: 2px; }
+  .cu .out .pxt pre { white-space: pre-wrap; margin: 6px 0; font-size: 12.5px; } .cu .out .pxt pre.tbl { white-space: pre; overflow-x: auto; }
+  .cu .out .pxt .pxt-cut { color: #8A7F6A; font-size: 13px; }
+  .cu-lib { background: #FFFFFF; border-color: #8A92A0; color: #1E293B; width: min(560px, 92vw); }
+  .cu-lib h3 { margin: 0 0 6px; font-size: 18px; } .cu-lib h4 { margin: 14px 0 4px; font-size: 14px; color: #64748B; font-weight: 700; }
+  .cu-lib .lw { display: flex; align-items: center; gap: 6px; margin: 10px 0 2px; font-weight: 700; font-size: 14px; } .cu-lib .sw { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+  .cu-lib .lst { list-style: none; padding: 0; margin: 0; display: block; }
+  .cu-lib .lst li { display: flex; align-items: center; gap: 8px; padding: 7px 6px; border-bottom: 1px solid #EEF0F3; cursor: pointer; font-size: 14px; }
+  .cu-lib .lst li:hover { background: #F4F6F9; }
+  .cu-lib .lst i { width: 8px; height: 8px; border-radius: 50%; background: #EF4444; flex: none; } .cu-lib .lst i.r { background: transparent; }
+  .cu-lib .lt { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cu-lib .ld { flex: none; font-size: 12px; color: #94A3B8; } .cu-lib .ld.old { color: #B7865A; }
+  .cu-lib .ok { color: #16A34A; flex: none; } .cu-lib .lb { flex: none; font-size: 12px; color: #2563EB; } .cu-lib .none { color: #94A3B8; margin: 0; }
   .cu-worker .out li { margin-bottom: 6px; } .cu-worker .out code { direction: ltr; unicode-bidi: embed; background: #EFE6D2; padding: 1px 4px; border-radius: 3px; }
   .cu-worker .foot { font-size: 13px; color: #8A7A62; border-top: 1px dashed #C9B48F; padding-top: 8px; }
   @media (max-width: 700px) { .cu-desk, .cu-board { grid-template-columns: minmax(0, 1fr); } }
@@ -735,6 +749,7 @@ function setMain(html) {
   for (const m of $('main').querySelectorAll('video.pxm, audio.pxm')) if (m.dataset.keep && (!m.paused || m.currentTime > 0)) media[m.dataset.keep] = m;
   swapMain(html);
   for (const m of $('main').querySelectorAll('video.pxm, audio.pxm')) { const o = media[m.dataset.keep]; if (o && o !== m && !o.isConnected) m.replaceWith(o); }
+  pxFillText();
 }
 function swapMain(html) {
   const live = document.getElementById('pxo'), t = document.createElement('template');
@@ -1046,20 +1061,72 @@ function pxMediaHtml(src) {
   if (k === 'image') return `<a href="${esc(src)}" target="_blank" rel="noopener"><img${a} alt=""></a>`;
   return `<iframe${a} title="PDF"></iframe>`;
 }
-function pxOuts(out) {
-  const BSL = String.fromCharCode(92), list = out == null ? [] : Array.isArray(out) ? out : [out];
-  return list.map(o => {
-    if (o == null) return '';
-    const v = typeof o === 'string' ? { val: o } : o, val = typeof v.val === 'string' ? v.val : '';
-    const url = v.url || v.href || (/^https?:/i.test(val) ? val : '');
-    const path = v.path || v.file || (/^[A-Za-z]:/.test(val) || val.startsWith(BSL + BSL) ? val : '');
-    const label = v.label ? '<b>' + esc(v.label) + ':</b> ' : '';
-    if (url) return '<li>' + label + '<a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(url) + '</a>' + pxMediaHtml(url) + '</li>';
-    if (path) { const p2 = String(path).split(BSL).join('/').replace(/%/g, '%25').replace(/#/g, '%23').replace(/\?/g, '%3F'), href = p2.startsWith('//') ? 'file:' + p2 : 'file:///' + p2;
-      return '<li>' + label + '<code>' + esc(path) + '</code> · <a href="' + esc(href) + '" target="_blank" rel="noopener">פתיחה</a>' + pxMediaHtml(href) + '</li>'; }
-    const text = v.text || val;
-    return text ? '<li>' + label + esc(String(text)) + '</li>' : '';
-  }).filter(Boolean).join('');
+// One entry of "out": { url, path, text, label }.
+function pxOutTarget(o) {
+  const BSL = String.fromCharCode(92);
+  if (o == null) return null;
+  const v = typeof o === 'string' ? { val: o } : o, val = typeof v.val === 'string' ? v.val : '';
+  return { url: v.url || v.href || (/^https?:/i.test(val) ? val : ''), path: v.path || v.file || (/^[A-Za-z]:/.test(val) || val.startsWith(BSL + BSL) ? val : ''),
+    text: v.text || val, label: v.label || '' };
+}
+const pxOutList = out => (out == null ? [] : Array.isArray(out) ? out : [out]).map(pxOutTarget).filter(t => t && (t.url || t.path || t.text));
+// A product is something to look at: a link, or a picture, a video, a sound or a PDF. Anything else, a results file, a document or
+// words, records that the task was done (the owner, 22/11: "זה לא תוצר. זה סיום משימה"). Only a product puts a task on the
+// library's shelf "מוכן לראות".
+const pxIsProduct = t => !!t && (!!t.url || (!!t.path && !!pxMediaKind(t.path)));
+// A text file in an output is shown inside the task's page (the owner, 22/11: "אם יש תוכן לתוצר - שאפשר להציג, אז להציג"):
+// read through the picked folders; a file on another drive through Ezra's copy in <Ezra>\mirror\<drive letter>\..., which Ezra's
+// card copier keeps for every text file a card points to. Up to 200 KB; Markdown gets headings, lists, bold and code.
+const PX_TEXT = /\.(md|txt|json|csv|log)$/i, pxTextCache = {};
+async function pxReadText(path) {
+  const BSL = String.fromCharCode(92), p = String(path).split(BSL).join('/'), shown = String(CONFIG.shown || '').split(BSL).join('/');
+  let parts;
+  if (shown && p.toLowerCase().startsWith(shown.toLowerCase())) parts = p.slice(shown.length).split('/').filter(Boolean);
+  else { const m = p.match(/^([A-Za-z]):\/(.+)$/); if (!m) throw new Error('path'); parts = EZRA.concat(['mirror', m[1].toUpperCase()], m[2].split('/').filter(Boolean)); }
+  let d = root; for (const x of parts.slice(0, -1)) d = await d.getDirectoryHandle(x);
+  const f = await (await d.getFileHandle(parts[parts.length - 1])).getFile(), MAX = 200000;
+  return { t: await f.slice(0, MAX).text(), cut: f.size > MAX };
+}
+function pxMd(src) {
+  const inl = s => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+  let h = '', code = false, list = false, tbl = [];
+  const flush = () => { if (list) { h += '</ul>'; list = false; } if (tbl.length) { h += '<pre class="tbl">' + esc(tbl.join('\n')) + '</pre>'; tbl = []; } };
+  for (const l of String(src).split('\n').map(x => x.replace(/\s+$/, ''))) {
+    if (/^```/.test(l)) { flush(); h += code ? '</pre>' : '<pre>'; code = !code; continue; }
+    if (code) { h += esc(l) + '\n'; continue; }
+    if (/^\s*\|/.test(l)) { if (list) { h += '</ul>'; list = false; } tbl.push(l); continue; }
+    const hd = l.match(/^(#{1,6})\s+(.*)/), li = l.match(/^\s*(?:[-*]|\d+\.)\s+(.*)/);
+    if (li) { if (tbl.length) flush(); if (!list) { h += '<ul>'; list = true; } h += '<li>' + inl(li[1]) + '</li>'; continue; }
+    flush();
+    if (hd) h += '<h5>' + inl(hd[2]) + '</h5>'; else if (l.trim()) h += '<p>' + inl(l) + '</p>';
+  }
+  flush(); if (code) h += '</pre>';
+  return h;
+}
+const pxTextHtml = (path, r) => (/\.md$/i.test(path) ? pxMd(r.t) : '<pre>' + esc(/\.json$/i.test(path) ? (() => { try { return JSON.stringify(JSON.parse(r.t.replace(/^﻿/, '')), null, 2); } catch (e) { return r.t; } })() : r.t) + '</pre>') + (r.cut ? '<p class="pxt-cut">הקובץ ארוך. ההמשך בקישור.</p>' : '');
+// After the page is built: every text box not read yet (or read more than 2 minutes ago) is read and filled.
+function pxFillText() {
+  for (const el of document.querySelectorAll('.pxt[data-tpath]')) {
+    const p = el.dataset.tpath, c = pxTextCache[p];
+    if (c && (c.busy || Date.now() - c.at < 120000)) continue;
+    pxTextCache[p] = Object.assign({}, c || {}, { busy: true });
+    pxReadText(p).then(r => { pxTextCache[p] = { html: pxTextHtml(p, r), at: Date.now() }; })
+      .catch(() => { pxTextCache[p] = { html: '<p class="pxt-cut">אי אפשר להציג את הקובץ כאן. אפשר לפתוח אותו בקישור.</p>', at: Date.now() }; })
+      .then(() => { for (const e of document.querySelectorAll('.pxt[data-tpath]')) if (e.dataset.tpath === p) e.innerHTML = pxTextCache[p].html; });
+  }
+}
+// The entries of "out" as list items: a link with its picture, video or PDF; a file with its path, an open link and, for a
+// picture, video, PDF or text file, its content; anything else is the words themselves. which: 'product', 'record' or all.
+function pxOuts(out, which) {
+  const BSL = String.fromCharCode(92);
+  return pxOutList(out).filter(t => !which || (which === 'product') === pxIsProduct(t)).map(t => {
+    const label = t.label ? '<b>' + esc(t.label) + ':</b> ' : '';
+    if (t.url) return '<li>' + label + '<a href="' + esc(t.url) + '" target="_blank" rel="noopener">' + esc(t.url) + '</a>' + pxMediaHtml(t.url) + '</li>';
+    if (t.path) { const p2 = String(t.path).split(BSL).join('/').replace(/%/g, '%25').replace(/#/g, '%23').replace(/\?/g, '%3F'), href = p2.startsWith('//') ? 'file:' + p2 : 'file:///' + p2;
+      const tx = PX_TEXT.test(t.path) ? `<div class="pxt" data-tpath="${esc(t.path)}">${pxTextCache[t.path] && pxTextCache[t.path].html ? pxTextCache[t.path].html : '<p class="pxt-cut">טוען…</p>'}</div>` : '';
+      return '<li>' + label + '<code>' + esc(t.path) + '</code> · <a href="' + esc(href) + '" target="_blank" rel="noopener">פתיחה</a>' + pxMediaHtml(href) + tx + '</li>'; }
+    return '<li>' + label + esc(String(t.text)) + '</li>';
+  }).join('');
 }
 // A standing binder in the session's color, with a white sticker that carries the worker's emoji.
 const pxBinder = (x, y, p, h = 8) => `<rect x="${x}" y="${y}" width="4" height="${h}" fill="${pxTie(p)}"/><rect x="${x}" y="${y}" width="4" height="1" fill="#000000" fill-opacity=".2"/>` +
@@ -1600,7 +1667,7 @@ function pxLibrary(workers) {
     for (const it of (Array.isArray(r.s.items) ? r.s.items : [])) {
       const tx = pxTxt(it), o = it && typeof it === 'object' ? it : {};
       if (!tx || o.later) continue;
-      const d = pxItemDate(it), key = pxTaskKey(r.p, tx), see = Array.isArray(o.out) && o.out.length ? 1 : 0;
+      const d = pxItemDate(it), key = pxTaskKey(r.p, tx), see = pxOutList(o.out).some(pxIsProduct) ? 1 : 0;
       if (pxHidden.has(key)) continue;
       if (o.done) { if (pxRecentDate(d)) done.push({ p: r.p, t: tx, d, key, see, today: d >= t0, wi }); }
       else if (o.guy && waits) continue;
@@ -1880,12 +1947,14 @@ function pxCloseup(kind, c) {
   } else if (kind.startsWith('task:')) {
     // A binder's own page: the task, where it is, and its output (a link, a file or document, an answer).
     const k = kind.slice(5), x = (c.taskByKey || {})[k]; if (!x) return '';
-    const it = x.it || {}, s = x.r.s || {}, col = pxTie(x.p), outs = pxOuts(it.out);
+    const it = x.it || {}, s = x.r.s || {}, col = pxTie(x.p), outs = pxOuts(it.out, 'product'), recs = pxOuts(it.out, 'record');
     const where = it.done ? 'נגמר' : it.guy ? 'מחכה לך' : it.later ? 'נדחה' : x.desk ? 'פתוח על השולחן: בעבודה עכשיו' : 'משימה פתוחה';
     const when = pxItemDate(it);
     cls = 'cu-worker';
     body = `<div class="head" style="--c:${esc(col)}"><span class="em">${esc(x.p.emoji || '')}</span><div><h3>${esc(x.t)}</h3><div class="st">${who(x.p)} · ${esc(where)}${when ? ' · ' + esc(it.at ? stamp(it.at) : when.getDate() + '/' + (when.getMonth() + 1)) : ''}</div></div></div>` +
-      `<div class="sec"><h4>התוצר</h4>${outs ? `<ul class="out">${outs}</ul>` : '<p>עוד אין תוצר למשימה הזו. כשיהיה, העובד יכתוב אותו בשדה out של המשימה.</p>'}</div>` +
+      (outs ? `<div class="sec"><h4>התוצר</h4><ul class="out">${outs}</ul></div>` : '') +
+      (recs ? `<div class="sec"><h4>${it.done ? 'סיום המשימה' : 'עד עכשיו'}</h4><ul class="out">${recs}</ul></div>` : '') +
+      (outs || recs ? '' : `<div class="sec"><p>${it.done ? 'נגמר, בלי תוצר.' : 'עוד אין תוצר.'}</p></div>`) +
       (x.now ? '<div class="sec"><p>זו המשימה של עכשיו, מתוך now. אין לה פריט משלה.</p></div>' : '') +
       `<div class="foot"><button class="cu-link" data-act="read:${esc(k)}">${pxRead.has(k) ? 'לסמן שלא נקרא' : 'לסמן שנקרא'}</button> · <button class="cu-link" data-act="open:w:${esc(x.p.id)}">החלון של ${esc(x.p.name)}</button> · <button class="cu-link" data-act="open:shelf">כל הספרייה</button>${it.guy || it.later || x.now ? '' : ` · <button class="cu-link" data-act="hide:${esc(k)}">${pxHidden.has(k) ? 'להחזיר לספרייה' : 'להוריד מהספרייה'}</button>`}</div>`;
   } else if (kind.startsWith('note:')) {
@@ -1927,21 +1996,26 @@ function pxCloseup(kind, c) {
   } else if (kind === 'shelf' || kind === 'old' || kind.startsWith('lib:')) {
     // The library's list (22/11): by worker, in the order of projects.json; in each, the new ones first, the old ones after them.
     // "lib:<id>": one worker's binder. "old": the box, only what did not change for more than 3 days.
-    cls = 'cu-board';
+    // Quick to read (the owner, 22/11: "זה ממש לא מונגש להבנה מהירה"): one short line per task, the date at its end, a red dot
+    // when not read yet; the whole text on the task's page. Sections: open, ready to see (a product), done.
+    cls = 'cu-lib';
     const only = kind.startsWith('lib:') ? kind.slice(4) : null, oldOnly = kind === 'old', idOf = d => d.p.id || d.p.name;
-    const tks = (c.tasks || []).filter(d => (!only || idOf(d) === only) && (!oldOnly || d.stale)), rd = d => pxRead.has(d.key), unread = tks.filter(d => !rd(d)).length;
-    const li = (d, fin) => `<li data-act="open:task:${esc(d.key)}" style="cursor:pointer${rd(d) ? ';opacity:.6' : ';font-weight:700'}" title="לחיצה: דף המשימה, עם התוצר">${fin ? '<span style="color:#16A34A">✓</span> ' : ''}${esc(d.t)}${d.see ? ' <span style="color:#60A5FA" title="יש בו מה לראות">▶</span>' : ''}${!fin && d.stale && !oldOnly ? ' <span style="color:#B7865A">· ישן</span>' : ''}${rd(d) ? '' : ' <span style="color:#EF4444">●</span>'} <button class="cu-link" data-act="hide:${esc(d.key)}" title="להוריד מהספרייה">✕</button></li>`;
+    const tks = (c.tasks || []).filter(d => (!only || idOf(d) === only) && (!oldOnly || d.stale));
+    const short = t => { t = String(t).replace(/\s+/g, ' ').trim(); return t.length > 72 ? t.slice(0, 70).replace(/\s+\S*$/, '') + '…' : t; };
+    const day = d => d ? d.getDate() + '/' + (d.getMonth() + 1) : '';
+    const row = (d, fin) => `<li data-act="open:task:${esc(d.key)}" title="${esc(d.t)}"><i class="${pxRead.has(d.key) ? 'r' : ''}"></i>${fin ? '<span class="ok">✓</span>' : ''}<span class="lt">${esc(short(d.t))}</span>${d.see ? '<span class="lb">▶ לראות</span>' : ''}<span class="ld${!fin && d.stale ? ' old' : ''}">${esc(day(d.d))}</span></li>`;
     const newest = (a, b) => (b.d ? +b.d : 0) - (a.d ? +a.d : 0);
+    const ord = list => list.filter(d => !d.stale).sort(newest).concat(list.filter(d => d.stale).sort(newest));
     const byW = list => { const gs = [], gi = {}; for (const d of list) { const id = idOf(d); if (!gi[id]) gs.push(gi[id] = { p: d.p, wi: d.wi, list: [] }); gi[id].list.push(d); } return gs.sort((a, b) => a.wi - b.wi); };
-    const grp = (g, fin) => `<h4 style="margin:.7em 0 .2em"><span style="color:${esc(pxTie(g.p))}">▮</span> ${who(g.p)} · ${g.list.length}</h4><ul class="done">${(fin ? g.list : g.list.filter(d => !d.stale).sort(newest).concat(g.list.filter(d => d.stale).sort(newest))).map(d => li(d, fin)).join('')}</ul>`;
+    const block = (list, fin) => only ? `<ul class="lst">${(fin ? list : ord(list)).map(d => row(d, fin)).join('')}</ul>`
+      : byW(list).map(g => `<div class="lw"><span class="sw" style="background:${esc(pxTie(g.p))}"></span>${who(g.p)}</div><ul class="lst">${(fin ? g.list : ord(g.list)).map(d => row(d, fin)).join('')}</ul>`).join('');
     const dn = oldOnly ? [] : (c.done || []).filter(d => !only || idOf(d) === only), seeL = dn.filter(d => d.see), rest = dn.filter(d => !d.see);
-    const name = only ? (c.rowsById[only] ? who(c.rowsById[only].p) : esc(only)) : '';
-    body = `<div class="col"><h3 class="blue">${only ? name + ' · משימות פתוחות' : oldOnly ? 'ישן · לא זזו יותר מ־3 ימים' : 'משימות פתוחות'} · ${tks.length}${unread ? ' · ' + unread + ' לא נקראו' : ''}</h3>` +
-      (tks.length ? (only ? `<ul class="done">${tks.filter(d => !d.stale).sort(newest).concat(tks.filter(d => d.stale).sort(newest)).map(d => li(d, false)).join('')}</ul>` : byW(tks).map(g => grp(g, false)).join('')) : '<p>אין משימות פתוחות.</p>') +
-      (oldOnly ? '' : `<h3 class="green">מוכן לראות · ${seeL.length}</h3>` + (seeL.length ? (only ? `<ul class="done">${seeL.map(d => li(d, true)).join('')}</ul>` : byW(seeL).map(g => grp(g, true)).join('')) : '<p>אין עכשיו.</p>') +
-        (rest.length ? `<h3>נגמר, בלי תוצר · ${rest.length}</h3>` + (only ? `<ul class="done">${rest.map(d => li(d, true)).join('')}</ul>` : byW(rest).map(g => grp(g, true)).join('')) : '')) +
-      `<p>קודם החדש · ישן: לא זז 3 ימים · ▶ יש תוצר · ✕ להוריד${pxHidden.size ? ` · <button class="cu-link" data-act="unhide-all">הורדו ${pxHidden.size} · להחזיר הכול</button>` : ''}</p>` +
-      (only || oldOnly ? `<div class="foot"><button class="cu-link" data-act="open:shelf">כל הספרייה</button>${only ? ` · <button class="cu-link" data-act="open:w:${esc(only)}">החלון של העובד</button>` : ''}</div>` : '') + `</div>`;
+    const head = only ? (c.rowsById[only] ? who(c.rowsById[only].p) : esc(only)) : oldOnly ? 'ישן: לא זזו יותר מ־3 ימים' : 'הספרייה';
+    body = `<h3>${head}</h3>` +
+      `<h4>פתוח · ${tks.length}</h4>` + (tks.length ? block(tks, false) : '<p class="none">אין</p>') +
+      (seeL.length ? `<h4>מוכן לראות · ${seeL.length}</h4>` + block(seeL, true) : '') +
+      (rest.length ? `<h4>נגמר · ${rest.length}</h4>` + block(rest, true) : '') +
+      `<div class="foot">${only || oldOnly ? `<button class="cu-link" data-act="open:shelf">כל הספרייה</button>` : ''}${only ? ` · <button class="cu-link" data-act="open:w:${esc(only)}">החלון של העובד</button>` : ''}${pxHidden.size ? `${only || oldOnly ? ' · ' : ''}<button class="cu-link" data-act="unhide-all">הורדו ${pxHidden.size} · להחזיר</button>` : ''}</div>`;
   } else if (kind === 'mail') {
     cls = 'cu-cab';
     body = `<h3>חדר הדואר · בקשות בין עובדים</h3>` + (c.reqs.length ? `<ul>${c.reqs.map(({ from, q }) => `<li>${who(from)} ← ${esc(q.to)}: ${esc(q.what)}${reqTag(q) ? ` <span class="old">⏳ ${esc(reqTag(q))}</span>` : ''}</li>`).join('')}</ul>` : '<p>אין בקשות פתוחות.</p>');
