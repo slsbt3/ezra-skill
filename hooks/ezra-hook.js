@@ -88,6 +88,40 @@ function lastEffort(transcript) {
   } catch (e) { return null; }
 }
 
+// Ultracode, for the cupcake on the desk: a worker that writes it itself can miss it (the notice that it was turned on may be far
+// back in its conversation). The transcript gets an "ultra_effort_enter" attachment when Ultracode is turned on (and now and then
+// while it stays on), and "ultra_effort_exit" when it is turned off; the last of them says. They are rare, so the whole transcript
+// is read once, and then only what was added since: state\ultra.json keeps the offset and the answer per transcript.
+// No marker at all: null, and the card keeps what the worker wrote.
+function ultraOn(transcript) {
+  try {
+    if (!transcript || !fs.existsSync(transcript)) return null;
+    const cf = path.join(STATE, 'ultra.json'); let c = {}; try { c = readJson(cf); } catch (e) { /* new */ }
+    const size = fs.statSync(transcript).size, k = norm(transcript), was = c[k] && c[k].off <= size ? c[k] : { off: 0, on: null };
+    let on = was.on;
+    if (size > was.off) {
+      const fd = fs.openSync(transcript, 'r'), CH = 4 * 1024 * 1024, buf = Buffer.alloc(CH);
+      let pos = Math.max(0, was.off - 64), tail = '';
+      while (pos < size) {
+        const n = fs.readSync(fd, buf, 0, Math.min(CH, size - pos), pos); if (!n) break; pos += n;
+        const s = tail + buf.toString('utf8', 0, n);
+        for (const m of s.matchAll(/"type":"ultra_effort_(enter|exit)"/g)) on = m[1] === 'enter';
+        tail = s.slice(-64);
+      }
+      fs.closeSync(fd);
+      c[k] = { off: size, on }; writeJson(cf, c);
+    }
+    return on;
+  } catch (e) { return null; }
+}
+// The effort and Ultracode from the session itself into the card; true when something changed.
+function fromSession(s, transcript) {
+  let ch = false; const ef = lastEffort(transcript), uc = ultraOn(transcript);
+  if (ef && s.effort !== ef) { s.effort = ef; ch = true; }
+  if (uc !== null && s.ultracode !== uc) { s.ultracode = uc; ch = true; }
+  return ch;
+}
+
 function main(input) {
   fs.mkdirSync(path.join(STATE, 'unknown'), { recursive: true });
   const sid = input.session_id || '', cwd = input.cwd || process.cwd();
@@ -102,7 +136,7 @@ function main(input) {
     const proj = projects().find(p => p.id === id); if (!proj) return null;
     const f = statusFile(proj), s = readJson(f), now = isoNow();
     s.status = 'עובד'; s.updatedAt = now;
-    const ef = lastEffort(input.transcript_path); if (ef) s.effort = ef;
+    fromSession(s, input.transcript_path);
     writeJson(f, s);
     writeJson(path.join(STATE, 'turn-' + sid + '.json'), { id, start: now, mtime: fs.statSync(f).mtimeMs });
     writeJson(path.join(STATE, 'seen-' + id + '.json'), { session: sid, cwd, t: now });
@@ -130,6 +164,8 @@ function main(input) {
     if (!touched && !input.stop_hook_active) {
       return { decision: 'block', reason: `hook של עזרא: לא עדכנת את status.json שלך (${id}) בתור הזה. לפני שאתה מסיים: now במשפט, והמצב האמיתי (עובד / ${WAIT} עם waitingForGuy ופריט guy / ממתין / הסתיים), עם updatedAt מהשעון.` };
     }
+    // At the end too, so what the worker wrote during the turn does not stay wrong until the next one.
+    try { const s = readJson(f); if (fromSession(s, input.transcript_path)) writeJson(f, s); } catch (e) { logErr(e); }
     log(id, 'stop', sid);
     try { fs.unlinkSync(tf); } catch (e) { /* already gone */ }
     return null;

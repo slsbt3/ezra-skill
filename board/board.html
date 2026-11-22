@@ -289,6 +289,12 @@
   .qlog .h-gold { color: #ffd23f; } .qlog .h-later { color: #e9c98b; } .qlog .h-done { color: #5ce1a0; } .qlog .h-share { color: #b0b8c6; }
   .qlog .row { color: #d8cff0; font-size: 13.5px; }
   .qlog .row.bad { color: var(--bad); }
+  .efft { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 4px 10px; margin-top: 4px; }
+  .qlog .legend .efft { grid-column: 1 / -1; margin-top: 0; }
+  .efft > b { flex-basis: 100%; }
+  .effc { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; }
+  .effc svg { background: #EBDDC3; border-radius: 3px; padding: 2px 3px; }
+  .effc small { font-size: 11px; }
   .qlog .legend { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 10px; font-size: 12px; color: #b9b3d6; border-top: 2px solid #3a3460; padding-top: var(--s2); }
   .viewbtn[aria-pressed="true"] { border-color: var(--orange); color: var(--orange); }
   @keyframes pxbob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
@@ -781,6 +787,10 @@ function swapMain(html) {
 let pxWhere = {}, pxMoves = {}, pxSince = {}, pxSpotOf = {}, pxSeatOf = {};
 // Who comes out of the lift (new workers) and who walks into it (gone to the archive), and where each desk was last time.
 let pxArrive = new Set(), pxLeaving = {}, pxLast = {}, pxKnownMem = null;
+// A worker who comes carries its desk in a cardboard box, puts it on the floor, and the box opens into the desk; one who leaves for
+// the archive folds its desk back into the box and carries it to the lift (the owner, 22/11). pxBox: the arrivals, by id, with their
+// times. pxEsc: Ezra walking them to and from the lift (the owner: "עזרא מלווה את העובד למעלית ומהמעלית. בלי קופסא. רק מלווה").
+let pxBox = {}, pxEsc = null, pxLayout = null;
 // Who came and who left since the owner last looked at the office (kept in this browser): a new worker comes out of the lift
 // to the lift's bell; one who went to the archive gets a sad trombone and walks into the lift. The very first look only remembers.
 const PX_STAFF_KEY = 'ezra-board-staff';
@@ -790,14 +800,14 @@ function pxStaff(workers, rows) {
   known = known && Array.isArray(known.active) ? known : pxKnownMem;
   if (known) {
     for (const id of active) if (!known.active.includes(id)) pxArrive.add(id);
-    for (const r of rows) if (r.p.archived && known.active.includes(r.p.id) && !pxLeaving[r.p.id]) pxLeaving[r.p.id] = { p: r.p, todo: true };
+    for (const r of rows) if (r.p.archived && known.active.includes(r.p.id) && !pxLeaving[r.p.id]) pxLeaving[r.p.id] = { p: r.p, i: r.i, todo: true };
   }
   pxKnownMem = { active, archived };
   try { localStorage.setItem(PX_STAFF_KEY, JSON.stringify(pxKnownMem)); } catch (e) { /* no storage: this page still remembers */ }
 }
 function pxClock() {
   const el = document.getElementById('pxo');
-  if (!el || !el.getCurrentTime) { pxMoves = {}; pxSince = {}; pxBinderAt = {}; pxFlights = {}; pxEz = null; return 0; }
+  if (!el || !el.getCurrentTime) { pxMoves = {}; pxSince = {}; pxBinderAt = {}; pxFlights = {}; pxEz = null; pxBox = {}; pxEsc = null; return 0; }
   return +el.getCurrentTime().toFixed(2);
 }
 // The coffee-corner cycle: standing, walking out (.62–.74), standing there, walking back (.84–.96).
@@ -813,16 +823,26 @@ function pxLoopPos(L, T) {
   return { x: +(L.sx + (L.tx - L.sx) * g).toFixed(1), y: +(L.y + (L.ty - L.y) * g).toFixed(1) };
 }
 // A walk along straight lines (behind the desk, down the aisle, then along the corner), about 24 pixels a second.
-function pxWalk(kind, pts, T) {
+function pxWalk(kind, pts, T, minD = 2.5) {
   let len = 0;
   for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
-  const t0 = +(T + .3).toFixed(2), d = +Math.min(14, Math.max(2.5, len / 30)).toFixed(2);
+  const t0 = +(T + .3).toFixed(2), d = +Math.min(14, Math.max(minD, len / 30)).toFixed(2);
   return { kind, pts, path: 'M' + pts.map(p => p[0] + ',' + p[1]).join(' L'), t0, d, t1: +(t0 + d).toFixed(2) };
 }
 // The walker is seen only during the walk; legs step all the way, and the emoji is on the shirt pocket.
-const pxWalker = (p, m) => `<g visibility="hidden"><set attributeName="visibility" to="visible" begin="${m.t0}s" end="${m.t1}s"/>` +
+// The cardboard box a worker carries its desk in (22/11): 12x9, a lighter top edge, a strip of tape down the middle and the worker's
+// emoji on its side. Open: its two top flaps stand out to the sides and its inside shows.
+const pxCarton = (x, y, p, open) => `<rect x="${x}" y="${y}" width="12" height="9" fill="#B98A5A"/><rect x="${x}" y="${y}" width="12" height="1" fill="#CFA270"/><rect x="${x}" y="${y + 8}" width="12" height="1" fill="#8E6A43"/>` +
+  (open ? `<rect x="${x - 3}" y="${y - 2}" width="4" height="2" fill="#A47A4E"/><rect x="${x + 11}" y="${y - 2}" width="4" height="2" fill="#A47A4E"/><rect x="${x + 1}" y="${y}" width="10" height="2" fill="#5E4128"/>`
+    : `<rect x="${x + 5}" y="${y}" width="2" height="5" fill="#D9B27A"/>`) +
+  `<text x="${x + 6}" y="${y + 7.4}" text-anchor="middle" font-size="3.4">${esc(p.emoji || '')}</text>`;
+// Something seen only from t0 until t1, or until t.
+const pxShowWin = (t0, t1, s) => `<g visibility="hidden"><set attributeName="visibility" to="visible" begin="${t0}s"/><set attributeName="visibility" to="hidden" begin="${t1}s" fill="freeze"/>${s}</g>`;
+const pxShowUntil = (t, s) => `<g><set attributeName="visibility" to="hidden" begin="${t}s" fill="freeze"/>${s}</g>`;
+// With "box", the walker carries its box in front of it (the box has its emoji).
+const pxWalker = (p, m, box) => `<g visibility="hidden"><set attributeName="visibility" to="visible" begin="${m.t0}s" end="${m.t1}s"/>` +
   `<animateMotion path="${m.path}" begin="${m.t0}s" dur="${m.d}s" fill="freeze"/>` + pxChar(0, 0, p, false, 'pxcu') + pxWalkLegs(0, 0, pxLegC(p), m.d, m.t0, [[0, 1]]) +
-  `<text x="10" y="12.3" text-anchor="middle" font-size="2.9">${esc(p.emoji || '')}</text></g>`;
+  (box ? pxCarton(1, 9, p, false) : `${p.figure === 'bina' ? '' : `<text x="10" y="12.3" text-anchor="middle" font-size="2.9">${esc(p.emoji || '')}</text>`}`) + `</g>`;
 // The office paints people by depth (the owner, 18/11: "השכבות במשרד עדיין לא בסדר אנשים עוברים מעל אנשים", then "כן, לתקן"): a walk
 // is cut into its straight legs, each seen only in its own part of the walk (by distance, as the walk itself) and painted by the y
 // of its feet there (its lowest point + 22).
@@ -833,8 +853,8 @@ function pxWalkParts(pts, t0, d) {
     if (b > a) out.push({ t0: a, t1: b, d: +(b - a).toFixed(2), y: Math.max(pts[i - 1][1], pts[i][1]) + 22, path: 'M' + pts[i - 1][0] + ',' + pts[i - 1][1] + ' L' + pts[i][0] + ',' + pts[i][1] }); }
   return out;
 }
-const pxWalkerLegs = (p, m) => { const parts = m.pts ? pxWalkParts(m.pts, m.t0, m.d) : [];
-  return parts.length ? parts.map(k => ({ y: k.y, s: pxWalker(p, k) })) : [{ y: 1e4, s: pxWalker(p, m) }]; };
+const pxWalkerLegs = (p, m, box) => { const parts = m.pts ? pxWalkParts(m.pts, m.t0, m.d) : [];
+  return parts.length ? parts.map(k => ({ y: k.y, s: pxWalker(p, k, box) })) : [{ y: 1e4, s: pxWalker(p, m, box) }]; };
 // Small letters that come out of a person's mouth and drift away to one side, fading: people talking, without speech bubbles.
 const pxChatter = (right, delay) => ['א', 'ב', 'ש'].map((ch, i) =>
   `<text x="${right ? 10 : 4}" y="6.5" text-anchor="middle" font-family="Heebo" font-size="2.6" font-weight="700" fill="#2A2F45" style="opacity:0;animation:${right ? 'pxchatr' : 'pxchatl'} 2.4s infinite ${(delay + i * .8).toFixed(1)}s">${ch}</text>`).join('');
@@ -978,12 +998,13 @@ const PX_EMOJI_COLOR = [
 const pxTint = (hex, k) => { const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '')); if (!m) return '#FFE9B0'; const n = parseInt(m[1], 16), mix = c => Math.round(c + (255 - c) * k);
   return '#' + [n >> 16, (n >> 8) & 255, n & 255].map(c => mix(c).toString(16).padStart(2, '0')).join(''); };
 const pxTie = p => { for (const [re, c] of PX_EMOJI_COLOR) if (re.test(p.emoji || '')) return c; return p.color || '#8C8C97'; };
-// One state per worker. A worker that waits on the owner but keeps working stays at the desk.
+// One state per worker. Whoever waits for the owner's answer sits on the bench, also while it keeps working (the owner, 22/11: "אם
+// יש מישהו שמחכה לתשובה שלי - למה הוא לא על הספסל?"; until then such a worker stayed at its desk).
 function pxState(r) {
   if (!r.s) return 'none';
   const st = statusOf(r.s), w = !!waitText(r.s);
   if (st === WAIT) return 'wait';
-  if (st === 'עובד') return w ? 'workwait' : 'work';
+  if (st === 'עובד') return w ? 'wait' : 'work';
   if (st === 'ממתין') return w ? 'wait' : 'idle';
   if (st === 'הסתיים') return 'done';
   return 'none';
@@ -1175,7 +1196,8 @@ const pxMap = (rows, y0, pal) => rows.map((r, j) => { const a = [...r]; let s = 
   for (let i = 0; i < a.length;) { let n = 1; while (a[i + n] === a[i]) n++;
     if (pal[a[i]]) s += `<rect x="${i}" y="${y0 + j}" width="${n}" height="1" fill="${pal[a[i]]}"/>`; i += n; }
   return s; }).join('');
-function pxBina(down) {
+function pxBina(down, bent) {
+  // bent: no forearms hanging at her sides; doing her nails her hands are in front of her (pxNailsHands).
   const R = (x, y, w, h, c) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${c}"/>`;
   return pxMap(['.....HHHH.....', '....HHLLHH....', '...HHLLHHHH...', '...HLLHHHHD...', '...HLHHHHHD...', '..HHHHHHHHHD..', '..DHHHHHHHDD..',
     '..SSWSSSWSSS..', '..HHHHHHHHHH..', '..HHLLHHHHHH..', '..HH......HH..', '..HH......HH..', '..HH......HH..', '.HHD......DHH.', 'HHD........DHH'], -7,
@@ -1185,7 +1207,7 @@ function pxBina(down) {
       : R(5, 3, 1, 1, '#4FA3C7') + R(8, 3, 1, 1, '#4FA3C7') + R(5, 4, 1, 1, '#1E1B2E') + R(8, 4, 1, 1, '#1E1B2E') + R(4, 5, 1, 1, '#F09A9A') + R(9, 5, 1, 1, '#F09A9A')) +
     R(6, 6, 2, 1, '#C81E3A') + R(3, 6, 1, 2, '#E8C547') + R(10, 6, 1, 2, '#E8C547') + R(6, 7, 2, 1, '#E2B48F') +
     pxMap(['..DDDKKKKDDD..', '.KDDDDKKDDDdK.', '.KDDDDDDDDDdK.', '.KDDDDDDDDDdK.', '.K.BBBbBBBB.K.', '.K.DDDDDDDd.K.', '.K.DDDDDDDd.K.',
-      '...DDDDDDDd...', '...dddddddd...', '....KK...KK...', '....WW...WW...'], 8, { K: '#EDC3A0', D: '#E0A526', d: '#B8841A', B: '#6B3E1F', b: '#E8C547', W: '#F4F4F5' });
+      '...DDDDDDDd...', '...dddddddd...', '....KK...KK...', '....WW...WW...'].map((r, i) => bent && i > 3 && i < 7 ? '..' + r.slice(2, 12) + '..' : r), 8, { K: '#EDC3A0', D: '#E0A526', d: '#B8841A', B: '#6B3E1F', b: '#E8C547', W: '#F4F4F5' });
 }
 const pxLegC = p => p && p.figure === 'bina' ? PX_BINA.legs : PX_LEGS;
 // Sitting (on the bench or a café chair): the thighs on the seat (a lit knee line), the lower legs down in front of the seat, the
@@ -1197,6 +1219,32 @@ const pxSitLegs = (p, x, y) => p.figure === 'bina'
   : `<rect x="${x + 3}" y="${y + 17}" width="8" height="2" fill="#3B3F58"/><rect x="${x + 3}" y="${y + 17}" width="3" height="1" fill="#565C7A"/><rect x="${x + 8}" y="${y + 17}" width="3" height="1" fill="#565C7A"/>` +
     `<rect x="${x + 4}" y="${y + 19}" width="2" height="2" fill="#3B3F58"/><rect x="${x + 8}" y="${y + 19}" width="2" height="2" fill="#3B3F58"/>` +
     `<rect x="${x + 3}" y="${y + 21}" width="3" height="1" fill="#1E1B2E"/><rect x="${x + 8}" y="${y + 21}" width="3" height="1" fill="#1E1B2E"/>`;
+// Bina doing her nails (the owner, 22/11: "בינה לא תמיד בקפה. לפעמים יושבת על השולחן ועושה ציפורניים", and then "למה היא על
+// השולחן? ולא מונפש שעושה ציפורניים?"): she sits in her chair at the desk as at work, looking down (her body is drawn before the
+// desk, as a worker's), and these are her hands above the desk's top: one held up with red nails, the other filing them in quick
+// strokes. Every 6 seconds she stops, lifts the hand to her face to look at it, and a sparkle shines. A red bottle of polish on the desk.
+function pxNailsHands(dx, dy) {
+  const X = dx + 6, Y = dy - 16, k = PX_BINA.skin, a = '#EDC3A0', D = 6;
+  const R = (x, y, w, h, c, o) => `<rect x="${+x.toFixed(2)}" y="${+y.toFixed(2)}" width="${w}" height="${h}" fill="${c}"${o ? ` fill-opacity="${o}"` : ''}/>`;
+  const mv = (v, ts) => `<animateTransform attributeName="transform" type="translate" values="${v.join(';')}" keyTimes="${ts.map(s => +(s / D).toFixed(4)).join(';')}" dur="${D}s" repeatCount="indefinite"/>`;
+  const sw = (on0, at0, at1) => `<animate attributeName="opacity" calcMode="discrete" values="${on0 ? '1;0;1' : '0;1;0'}" keyTimes="0;${+(at0 / D).toFixed(4)};${+(at1 / D).toFixed(4)}" dur="${D}s" repeatCount="indefinite"/>`;
+  // The filing hand: seven strokes in 4.2 seconds, then a little lower while the other hand is looked at. Its forearm, from the
+  // elbow at her side, moves half as much, so the arm stays whole.
+  const fv = [], ft = [];
+  for (let i = 0; i < 7; i++) { fv.push('0 0', '-1.8 .2'); ft.push(i * .6, i * .6 + .3); }
+  fv.push('0 0', '0 1.2', '0 1.2', '0 0'); ft.push(4.2, 4.5, 5.7, 6);
+  const half = fv.map(v => v.split(' ').map(n => +(n / 2).toFixed(2)).join(' '));
+  const sp = (x, y) => R(x - .25, y - 1.5, .5, 3, '#FFFFFF') + R(x - 1.5, y - .25, 3, .5, '#FFFFFF') + R(x - .3, y - .3, .6, .6, '#FDE68A');
+  // The polished hand's forearm from the elbow: across to the hand while she files, up toward her face while she looks at it.
+  return `<g>${sw(true, 4.65, 5.8)}${R(X + 1, Y + 11.2, 3.4, 1.2, a)}</g>` +
+    `<g opacity="0">${sw(false, 4.65, 5.8)}${R(X + 1, Y + 10, 1.4, 2, a) + R(X + 2.2, Y + 9.2, 1.4, 1.6, a) + R(X + 3.4, Y + 8.4, 1.8, 1.4, a)}</g>` +
+    `<g>${mv(['0 0', '0 0', '1 -3.5', '1 -3.5', '0 0'], [0, 4.5, 4.8, 5.6, 6])}` + R(X + 4, Y + 10.6, 2.2, 2.2, k) +
+      [0, .75, 1.5].map(i => R(X + 4 + i, Y + 9.2, .6, 1.6, k) + R(X + 4 + i, Y + 9.2, .6, .55, '#DC2626')).join('') + R(X + 6.2, Y + 11.2, .6, 1, k) + '</g>' +
+    `<g>${mv(half, ft)}${R(X + 8.8, Y + 10.8, 4.2, 1.2, a)}</g>` +
+    `<g>${mv(fv, ft)}` + R(X + 7.8, Y + 9.8, 2, 1.7, k) + R(X + 4.6, Y + 9.5, 3.6, .7, '#F1E2D2') + R(X + 4.6, Y + 9.5, 3.6, .25, '#A9877A') + '</g>' +
+    `<g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;.81;.83;.91;.93;1" dur="${D}s" repeatCount="indefinite"/>${sp(X + 3.2, Y + 5.2)}</g>` +
+    pxDrop(dx + 9.2, dx + 11, dy + 4.8) + R(dx + 9.2, dy + 2.2, 1.8, 2.6, '#DC2626') + R(dx + 9.4, dy + 2.5, .4, 1.6, '#F87171') + R(dx + 9.6, dy + 1.2, 1, 1, '#1E1B2E');
+}
 // Ezra: a tailcoat (a "monkey suit", the owner chose it): the jacket cut away at the waist over a white waistcoat, satin lapels, a bow tie
 // in his color, and two tails hanging to the knees at the sides. His head is the monkey of the board's logo (pxezhead).
 // pxezu is the same without legs; pxezk is without the right hand, for knocking with that arm raised.
@@ -1214,6 +1262,7 @@ const PX_DEFS = '<defs>' +
   '<symbol id="pxez" viewBox="0 0 14 22">' + PXEZ + pxLegs(0, 0, PX_EZLEGS) + '</symbol><symbol id="pxezk" viewBox="0 0 14 22">' + PXEZK + pxLegs(0, 0, PX_EZLEGS) + '</symbol><symbol id="pxezu" viewBox="0 0 14 22">' + PXEZ + '</symbol>' +
   '<symbol id="pxbina" viewBox="0 -7 14 29">' + pxBina(false) + pxLegs(0, 0, PX_BINA.legs) + '</symbol><symbol id="pxbinau" viewBox="0 -7 14 29">' + pxBina(false) + '</symbol>' +
   '<symbol id="pxbinad" viewBox="0 -7 14 29">' + pxBina(true) + pxLegs(0, 0, PX_BINA.legs) + '</symbol>' +
+  '<symbol id="pxbinan" viewBox="0 -7 14 29">' + pxBina(true, true) + pxLegs(0, 0, PX_BINA.legs) + '</symbol>' +
   // The office floor: warm grey carpet tiles (the owner chose them), two close shades with a few soft flecks. The id stays pxplanks.
   '<pattern id="pxplanks" width="32" height="32" patternUnits="userSpaceOnUse"><rect width="32" height="32" fill="#A39C92"/><rect width="16" height="16" fill="#9A938A"/><rect x="16" y="16" width="16" height="16" fill="#9A938A"/><rect x="0" y="0" width="1" height="1" fill="#ABA59B"/><rect x="29" y="0" width="1" height="1" fill="#ABA59B"/><rect x="31" y="0" width="1" height="1" fill="#958E85"/><rect x="7" y="1" width="1" height="1" fill="#958E85"/><rect x="18" y="1" width="1" height="1" fill="#958E85"/><rect x="14" y="2" width="1" height="1" fill="#958E85"/><rect x="21" y="3" width="1" height="1" fill="#ABA59B"/><rect x="28" y="3" width="1" height="1" fill="#958E85"/><rect x="9" y="4" width="1" height="1" fill="#ABA59B"/><rect x="28" y="4" width="1" height="1" fill="#958E85"/><rect x="17" y="5" width="1" height="1" fill="#ABA59B"/><rect x="3" y="7" width="1" height="1" fill="#958E85"/><rect x="5" y="7" width="1" height="1" fill="#ABA59B"/><rect x="7" y="7" width="1" height="1" fill="#958E85"/><rect x="12" y="7" width="1" height="1" fill="#958E85"/><rect x="17" y="7" width="1" height="1" fill="#958E85"/><rect x="18" y="8" width="1" height="1" fill="#ABA59B"/><rect x="5" y="9" width="1" height="1" fill="#ABA59B"/><rect x="25" y="9" width="1" height="1" fill="#958E85"/><rect x="15" y="10" width="1" height="1" fill="#ABA59B"/><rect x="17" y="10" width="1" height="1" fill="#958E85"/><rect x="11" y="12" width="1" height="1" fill="#958E85"/><rect x="1" y="13" width="1" height="1" fill="#958E85"/><rect x="28" y="13" width="1" height="1" fill="#958E85"/><rect x="6" y="14" width="1" height="1" fill="#958E85"/><rect x="10" y="14" width="1" height="1" fill="#ABA59B"/><rect x="14" y="14" width="1" height="1" fill="#958E85"/><rect x="24" y="14" width="1" height="1" fill="#958E85"/><rect x="10" y="15" width="1" height="1" fill="#ABA59B"/><rect x="20" y="15" width="1" height="1" fill="#ABA59B"/><rect x="23" y="16" width="1" height="1" fill="#ABA59B"/><rect x="1" y="17" width="1" height="1" fill="#958E85"/><rect x="2" y="17" width="1" height="1" fill="#958E85"/><rect x="6" y="17" width="1" height="1" fill="#ABA59B"/><rect x="29" y="17" width="1" height="1" fill="#958E85"/><rect x="10" y="18" width="1" height="1" fill="#ABA59B"/><rect x="17" y="19" width="1" height="1" fill="#ABA59B"/><rect x="27" y="19" width="1" height="1" fill="#958E85"/><rect x="27" y="20" width="1" height="1" fill="#ABA59B"/><rect x="30" y="20" width="1" height="1" fill="#ABA59B"/><rect x="9" y="21" width="1" height="1" fill="#958E85"/><rect x="16" y="21" width="1" height="1" fill="#ABA59B"/><rect x="31" y="21" width="1" height="1" fill="#958E85"/><rect x="24" y="23" width="1" height="1" fill="#958E85"/><rect x="22" y="24" width="1" height="1" fill="#958E85"/><rect x="1" y="26" width="1" height="1" fill="#ABA59B"/><rect x="2" y="26" width="1" height="1" fill="#958E85"/><rect x="31" y="27" width="1" height="1" fill="#958E85"/><rect x="7" y="28" width="1" height="1" fill="#958E85"/><rect x="9" y="28" width="1" height="1" fill="#958E85"/><rect x="12" y="28" width="1" height="1" fill="#958E85"/><rect x="20" y="28" width="1" height="1" fill="#ABA59B"/><rect x="28" y="28" width="1" height="1" fill="#958E85"/><rect x="0" y="29" width="1" height="1" fill="#ABA59B"/><rect x="8" y="29" width="1" height="1" fill="#958E85"/><rect x="12" y="29" width="1" height="1" fill="#ABA59B"/><rect x="13" y="29" width="1" height="1" fill="#958E85"/><rect x="5" y="30" width="1" height="1" fill="#958E85"/><rect x="20" y="30" width="1" height="1" fill="#ABA59B"/><rect x="0" y="31" width="1" height="1" fill="#958E85"/><rect x="6" y="31" width="1" height="1" fill="#958E85"/><rect x="21" y="31" width="1" height="1" fill="#958E85"/><rect x="27" y="31" width="1" height="1" fill="#ABA59B"/></pattern>' +
   '<pattern id="pxcarpet" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#5E7FB3"/><rect x="1" y="1" width="1" height="1" fill="#7395C9"/><rect x="5" y="5" width="1" height="1" fill="#7395C9"/></pattern>' +
@@ -1227,47 +1276,80 @@ const pxChair = (x, y) => { const t = y + 2;
     `<rect x="${x + 1}" y="${t + 3}" width="8" height="1" fill="#2B2F45"/><rect x="${x}" y="${t + 4}" width="10" height="6" fill="#2B2F45"/><rect x="${x + 1}" y="${t + 4}" width="8" height="6" fill="#4A5070"/>`;
   for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) s += `<rect x="${x + 1.5 + c * 2 + (r % 2)}" y="${t + 4.5 + r * 2}" width="1" height="1" fill="#6A7096"/>`;
   return s; };
-// A desk 30 wide. The screen shows the session's emoji: bright while working, dim (a screensaver) while away.
-function pxDesk(dx, dy, p, on) {
-  return `<rect x="${dx}" y="${dy}" width="30" height="6" fill="#EBDDC3"/><rect x="${dx}" y="${dy}" width="30" height="1" fill="#F7EEDC"/>` +
-    `<rect x="${dx}" y="${dy + 6}" width="30" height="1" fill="#C9B48F"/><rect x="${dx}" y="${dy + 7}" width="30" height="5" fill="#A9825A"/>` +
-    `<rect x="${dx + 2}" y="${dy + 8}" width="10" height="3" fill="#94704A"/><rect x="${dx + 18}" y="${dy + 8}" width="10" height="3" fill="#94704A"/>` +
+// A desk 30 wide, and "ext" more to its left (36 since 22/11, room for the piles of binders). The screen shows the session's emoji:
+// bright while working, dim (a screensaver) while away.
+function pxDesk(dx, dy, p, on, ext = 0) {
+  const x0 = dx - ext, w = 30 + ext;
+  return `<rect x="${x0}" y="${dy}" width="${w}" height="6" fill="#EBDDC3"/><rect x="${x0}" y="${dy}" width="${w}" height="1" fill="#F7EEDC"/>` +
+    `<rect x="${x0}" y="${dy + 6}" width="${w}" height="1" fill="#C9B48F"/><rect x="${x0}" y="${dy + 7}" width="${w}" height="5" fill="#A9825A"/>` +
+    `<rect x="${x0 + 2}" y="${dy + 8}" width="${10 + ext}" height="3" fill="#94704A"/><rect x="${dx + 18}" y="${dy + 8}" width="10" height="3" fill="#94704A"/>` +
     `<rect x="${dx + 19}" y="${dy - 10}" width="11" height="9" fill="#2A2F45"/><rect x="${dx + 20}" y="${dy - 9}" width="9" height="7" fill="${on ? '#DFF4FF' : '#323852'}"/>` +
     `<text x="${dx + 24.5}" y="${dy - 3.3}" font-size="5.6" text-anchor="middle"${on ? '' : ' opacity=".75"'}>${esc(p.emoji || '')}</text>` +
     `<rect x="${dx + 23}" y="${dy - 1}" width="3" height="1" fill="#2A2F45"/><rect x="${dx + 22}" y="${dy}" width="5" height="1" fill="#2A2F45"/>`;
 }
+// The desk coming out of its box, or going back into it (the owner, 22/11: "אנימציה חמודה שפותחת את השולחן וסוגרת אותו לקופסת
+// קרטון"): the desk, its screen and its chair grow from the box's size to their own in d seconds while the box's brown fades off
+// them (grow), or the other way round. Seen only from t0 to t0 + d.
+function pxDeskMorph(dx, dy, p, t0, d, grow, ext = 0) {
+  const cx = dx + 15, cy = dy + 6, a = '.36 .55', b = '1 1', t1 = +(t0 + d).toFixed(2), br = '#B98A5A';
+  return `<g visibility="hidden" style="pointer-events:none"><set attributeName="visibility" to="visible" begin="${t0}s"/><set attributeName="visibility" to="hidden" begin="${t1}s" fill="freeze"/>` +
+    `<g transform="translate(${cx} ${cy})"><g><animateTransform attributeName="transform" type="scale" values="${grow ? a + ';' + b : b + ';' + a}" keyTimes="0;1" calcMode="spline" keySplines=".3 0 .2 1" dur="${d}s" begin="${t0}s" fill="freeze"/>` +
+    `<g transform="translate(${-cx} ${-cy})">${pxChair(dx + 9, dy - 10)}${pxDesk(dx, dy, p, false, ext)}` +
+    `<g opacity="${grow ? 1 : 0}"><animate attributeName="opacity" values="${grow ? '1;0' : '0;1'}" dur="${d}s" begin="${t0}s" fill="freeze"/>` +
+    `<rect x="${dx - ext}" y="${dy}" width="${30 + ext}" height="12" fill="${br}"/><rect x="${dx + 19}" y="${dy - 10}" width="11" height="10" fill="${br}"/><rect x="${dx + 9}" y="${dy - 8}" width="10" height="8" fill="${br}"/></g></g></g></g></g>`;
+}
+// The documents a worker of research and documents leaves on its desk for the owner (the owner, 22/11, on Bina: "מסמך שהיא מציגה לי
+// ... צריכים לשבת על השולחן שלה. מסמכים כאלה ישארו על השולחן
+// עד שאבקש להעיף"): "desk" in its card, entries as in "out" ({ label, path | url, at }). They stay until the worker takes them off.
+const pxDeskDocs = r => (r.s && r.s.desk != null ? (Array.isArray(r.s.desk) ? r.s.desk : [r.s.desk]) : []).map(o => {
+  const t = pxOutTarget(o); if (!t || !(t.url || t.path)) return null;
+  const BSL = String.fromCharCode(92), file = t.path ? String(t.path).split(BSL).join('/').split('/').pop() : '', at = o && typeof o === 'object' && o.at ? new Date(o.at) : null;
+  return Object.assign(t, { name: t.label || file || t.url, at: at && !isNaN(at) ? at : null });
+}).filter(Boolean);
+const pxFileHref = path => { const p2 = String(path).split(String.fromCharCode(92)).join('/').replace(/%/g, '%25').replace(/#/g, '%23').replace(/\?/g, '%3F'); return p2.startsWith('//') ? 'file:' + p2 : 'file:///' + p2; };
+// A manila folder standing at the desk's left end, papers sticking out of it, with the number of documents in it from two.
+const pxDocsFolder = (x, y, n) => `<rect x="${x}" y="${y + 1}" width="5" height="7" fill="#C9A24E"/><rect x="${x + .6}" y="${y}" width="3.8" height="2.4" fill="#FFFFFF"/><rect x="${x + 1}" y="${y + .6}" width="2.6" height=".3" fill="#9AA3B5"/>` +
+  `<rect x="${x}" y="${y + 2.2}" width="5" height="5.8" fill="#F2D58E"/><rect x="${x}" y="${y + 2.2}" width="2.2" height=".8" fill="#E2B85C"/><rect x="${x}" y="${y + 7.6}" width="5" height=".4" fill="#B8913F"/>` +
+  (n > 1 ? `<text x="${x + 2.5}" y="${y + 6.8}" text-anchor="middle" font-family="Heebo" font-size="3" font-weight="800" fill="#6B4A1E">${n}</text>` : '');
 function pxChar(x, y, p, down, sym) {
   // Bina is drawn from her own symbols, which start 7 higher (her hair).
-  if (p.figure === 'bina') return `<use href="#${sym === 'pxcu' ? 'pxbinau' : sym === 'pxcd' || (!sym && down) ? 'pxbinad' : 'pxbina'}" x="${x}" y="${y - 7}" width="14" height="29"/>`;
+  if (p.figure === 'bina') return `<use href="#${sym === 'pxcu' ? 'pxbinau' : sym === 'nails' ? 'pxbinan' : sym === 'pxcd' || (!sym && down) ? 'pxbinad' : 'pxbina'}" x="${x}" y="${y - 7}" width="14" height="29"/>`;
   const l = pxLook(p);
   return `<use href="#${sym || (down ? 'pxcd' : 'pxch')}" x="${x}" y="${y}" width="14" height="22" style="color:${pxTie(p)};--h:${l.hair};--k:${l.skin}"/>`;
 }
 // The session's effort, in coffee on its desk (the owner's choice): a glass of water for low, one
 // coffee for medium, two for high, three for xhigh, and a coffee pot with a cup for max, at the front of the desk's right side. A
 // cupcake with purple icing beside them: Ultracode is on. The worker writes "effort" and "ultracode" in its card (skill 8.17); on the server the
-// hook writes "effort" too, from the session's transcript.
+// hook writes both, from the session's transcript, at the start and at the end of each turn.
 const PX_EFFORT = { low: 'נמוך', medium: 'בינוני', high: 'גבוה', xhigh: 'גבוה מאוד', max: 'מקסימום' };
 const PX_EFFORT_CUPS = { low: 'כוס מים', medium: 'כוס קפה', high: '2 כוסות קפה', xhigh: '3 כוסות קפה', max: 'קנקן קפה' };
 const pxEffortOf = s => { const e = s && String(s.effort || '').toLowerCase(); return e && PX_EFFORT[e] ? e : null; };
 const pxEffortTip = s => { const e = pxEffortOf(s), u = !!(s && s.ultracode === true);
   return [e ? 'מאמץ: ' + PX_EFFORT[e] + ' (' + PX_EFFORT_CUPS[e] + ')' : '', u ? 'Ultracode דלוק (הקאפקייק)' : ''].filter(Boolean).join(' · '); };
+// The effort table of the legend (the owner, 22/11: "טבלת המאמץ צריכה להיות אחרי קנקן להוסיף קפקייק"): the desk's own drawings in
+// order, from the glass of water to the coffee pot, and after the pot the cupcake of Ultracode, each with its name.
+function pxEffortTable() {
+  const cell = (svg, vb, w, name) => `<span class="effc"><svg viewBox="${vb}" width="${w}" height="26" aria-hidden="true">${svg}</svg><small>${name}</small></span>`;
+  return Object.keys(PX_EFFORT).map(e => cell(pxEffort(0, 0, { effort: e }), '18.6 0 10.4 6.4', 42, PX_EFFORT[e])).join('') +
+    cell(pxEffort(0, 0, { ultracode: true }), '14.6 0 4.4 6.4', 18, 'Ultracode');
+}
 function pxEffort(dx, dy, s) {
   const e = pxEffortOf(s), u = !!(s && s.ultracode === true); if (!e && !u) return '';
   const R = (x, y, w, h, f, o) => `<rect x="${+x.toFixed(2)}" y="${+y.toFixed(2)}" width="${w}" height="${h}" fill="${f}"${o != null ? ` fill-opacity="${o}"` : ''}/>`;
   const S = (x, y, w, h, f, st, sw) => `<rect x="${+x.toFixed(2)}" y="${+y.toFixed(2)}" width="${w}" height="${h}" fill="${f}" stroke="${st}" stroke-width="${sw}"/>`;
   // The cups stand at the front of the desk's right side, in front of the monitor (the owner's choice).
   const b = dy + 5.6, X = dx + 19.4;
-  const mug = (x, steam) => R(x, b - 3, 2.4, 3, '#FFFFFF') + R(x + .3, b - 2.7, 1.8, .7, '#6B3E26') + R(x - .7, b - 2.4, .7, 1.7, '#FFFFFF') + R(x - .45, b - 2.1, .25, 1.1, '#D9D2C5') +
+  const mug = (x, steam) => pxDrop(x - .7, x + 2.4, b) + R(x, b - 3, 2.4, 3, '#FFFFFF') + R(x + .3, b - 2.7, 1.8, .7, '#6B3E26') + R(x - .7, b - 2.4, .7, 1.7, '#FFFFFF') + R(x - .45, b - 2.1, .25, 1.1, '#D9D2C5') +
     R(x, b - .4, 2.4, .4, '#D9D2C5') + (steam ? `<rect x="${+(x + 1).toFixed(2)}" y="${+(b - 4.6).toFixed(2)}" width=".5" height="1.3" fill="#FFFFFF" fill-opacity=".85" style="animation:pxsteam 2s infinite"/>` : '');
   let g = '';
-  if (e === 'low') g = R(X + .4, b - 3.2, 2.2, 3.2, '#CFEFFF', .6) + R(X + .4, b - 2, 2.2, 2, '#7CC4F0', .8) + R(X + .4, b - 3.2, .35, 3.2, '#FFFFFF', .7);
-  else if (e === 'max') g = R(X, b - 4.4, 3.4, 4.4, '#BFD9E6', .65) + R(X, b - 2.9, 3.4, 2.9, '#4A2A18') + R(X - .2, b - 4.9, 3.8, .7, '#222222') +
+  if (e === 'low') g = pxDrop(X + .4, X + 2.6, b) + R(X + .4, b - 3.2, 2.2, 3.2, '#CFEFFF', .6) + R(X + .4, b - 2, 2.2, 2, '#7CC4F0', .8) + R(X + .4, b - 3.2, .35, 3.2, '#FFFFFF', .7);
+  else if (e === 'max') g = pxDrop(X, X + 4, b) + R(X, b - 4.4, 3.4, 4.4, '#BFD9E6', .65) + R(X, b - 2.9, 3.4, 2.9, '#4A2A18') + R(X - .2, b - 4.9, 3.8, .7, '#222222') +
     R(X + 3.4, b - 4, .6, 2.8, '#222222') + R(X + .3, b - 4.2, .4, 3.6, '#FFFFFF', .5) + mug(X + 5.6, true);
   else if (e) { const n = e === 'medium' ? 1 : e === 'high' ? 2 : 3; for (let i = 0; i < n; i++) g += mug(X + .4 + i * 3.2, n === 3 && i === n - 1); }
   // Ultracode: a cupcake with purple icing and a cherry, left of the cups (the owner's choice).
   const sx = dx + 14.4, sb = b;
   if (u) { const x = sx + .6, y = sb;
-    g += `<polygon points="${x},${y - 2.4} ${x + 3.4},${y - 2.4} ${x + 2.9},${y} ${x + .5},${y}" fill="#F2C14E" stroke="#B9873A" stroke-width=".3"/>` +
+    g += pxDrop(x + .5, x + 2.9, y) + `<polygon points="${x},${y - 2.4} ${x + 3.4},${y - 2.4} ${x + 2.9},${y} ${x + .5},${y}" fill="#F2C14E" stroke="#B9873A" stroke-width=".3"/>` +
       R(x + 1.1, y - 2.2, .3, 2, '#D9A43B') + R(x + 2, y - 2.2, .3, 2, '#D9A43B') +
       `<ellipse cx="${x + 1.7}" cy="${y - 2.9}" rx="2" ry="1.1" fill="#A78BFA" stroke="#6D28D9" stroke-width=".3" shape-rendering="geometricPrecision"/>` +
       `<ellipse cx="${x + 1.7}" cy="${y - 3.7}" rx="1.2" ry=".7" fill="#C4B5FD" shape-rendering="geometricPrecision"/>` +
@@ -1292,13 +1374,17 @@ const pxCheck = (x, y) => `<rect x="${x}" y="${y}" width="6" height="5" fill="#1
 // on a dark badge, as big as the ✓ of one who finished. It took the place of a small grey "z" that was hard to see.
 const pxWaitMark = (x, y) => `<rect x="${x}" y="${y}" width="7" height="7" fill="#334155"/><rect x="${x + 1}" y="${y + 1}" width="5" height="1" fill="#E9DCC4"/><rect x="${x + 2}" y="${y + 2}" width="3" height="1" fill="#FFD23F"/><rect x="${x + 3}" y="${y + 3}" width="1" height="1" fill="#FFD23F"/><rect x="${x + 2}" y="${y + 4}" width="3" height="1" fill="#FFD23F"/><rect x="${x + 1}" y="${y + 5}" width="5" height="1" fill="#E9DCC4"/>`;
 const pxPlant = (x, y) => `<rect x="${x + 3}" y="${y}" width="4" height="3" fill="#4D9A3A"/><rect x="${x + 1}" y="${y + 2}" width="8" height="4" fill="#5DB44A"/><rect x="${x}" y="${y + 4}" width="3" height="3" fill="#3F8530"/><rect x="${x + 7}" y="${y + 4}" width="3" height="3" fill="#3F8530"/><rect x="${x + 2}" y="${y + 8}" width="6" height="5" fill="#B4663A"/><rect x="${x + 2}" y="${y + 8}" width="6" height="1" fill="#D08452"/>`;
-// A blue envelope for a request from one worker to another, now and then (3 seconds out of every 10), with the sender's emoji (22/11).
-function pxEnv(x1, y1, x2, y2, k, tip, em) {
+// An envelope of the mail room: white (yellow when old), a stripe in the color of the worker it is for, the flap, and the sender's emoji.
+const pxEnvelope = (x, y, col, old, em) => `<rect x="${x}" y="${y}" width="6.6" height="5.2" fill="${old ? '#FDE68A' : '#FFFFFF'}"/><rect x="${x}" y="${y}" width="6.6" height="1" fill="${esc(col)}"/>` +
+  `<path d="M${+(x + .3).toFixed(2)},${+(y + 1.1).toFixed(2)} l3,1.6 l3,-1.6" stroke="#C9CED6" stroke-width=".35" fill="none"/>` +
+  `<text x="${+(x + 3.3).toFixed(2)}" y="${+(y + 4.7).toFixed(2)}" text-anchor="middle" font-size="2.8">${esc(em || '')}</text>`;
+// A request from one worker to another flies from the mail room to the desk it is for, now and then (3 seconds out of every 10): the
+// same envelope as in the mail room (the owner, 22/11: "למה זה לא נראה אותו דבר?"; it was a blue mark on a white card).
+function pxEnv(x1, y1, x2, y2, k, tip, em, col, old) {
   const d = `M${x1},${y1} C ${x1 + 20},${y1 - 40} ${x2 - 30},${y2 - 30} ${x2},${y2}`, dur = '10s', begin = ((k % 5) * 2).toFixed(1) + 's';
   return `<g><title>${esc(tip)}</title><animateMotion path="${d}" dur="${dur}" begin="${begin}" repeatCount="indefinite" keyPoints="0;1;1" keyTimes="0;.3;1" calcMode="linear"/>` +
     `<animate attributeName="opacity" values="0;1;1;0;0" keyTimes="0;.03;.27;.3;1" dur="${dur}" begin="${begin}" repeatCount="indefinite"/>` +
-    `<rect x="-3.5" y="-2.5" width="8" height="6" fill="#FFFFFF"/><rect x="-2.5" y="-1.5" width="1" height="1" fill="#38BDF8"/><rect x="-1.5" y="-.5" width="3" height="1" fill="#38BDF8"/><rect x="1.5" y="-1.5" width="1" height="1" fill="#38BDF8"/>` +
-    (em ? `<text x=".5" y="3" text-anchor="middle" font-size="2.6">${esc(em)}</text>` : '') + `</g>`;
+    pxEnvelope(-3.3, -2.6, col || '#38BDF8', old, em) + `</g>`;
 }
 function pxTip(r) { return [r.p.emoji + ' ' + r.p.name, r.s && r.s.now, r.s && waitText(r.s) && 'מחכה לך: ' + waitText(r.s), r.s && pxEffortTip(r.s)].filter(Boolean).join('\n'); }
 // The name on a desk is short: the part before " · " ("Render · fast renders" is "Render"), or the part after it when
@@ -1656,6 +1742,9 @@ const pxRecentDate = d => { if (!d) return false; const t0 = new Date(); t0.setH
 // for him while the worker writes no waiting text stays here, so it is never lost; a done one comes here too. "see": the task has
 // an output to look at ("out"). Since 22/11 the shelf shows one binder per worker (pxShelf), so each task also carries "wi", its
 // worker's place in projects.json, and "stale": no change for more than 3 days, or no date.
+// Since 22/11 (the owner: "בסיפריה צריכות להופיע רק משימות שהסתיימו", "על השולחן של כל עובד נשארת משימה עד שהיא גמורה") the
+// library holds only the finished ones ("done"); "tasks" are every open task of each worker, all of them on its desk (the one worked
+// on now too, with "now": true), for the lists.
 function pxLibrary(workers) {
   const tasks = [], done = [], t0 = new Date(); t0.setHours(0, 0, 0, 0);
   let wn = -1;
@@ -1663,16 +1752,16 @@ function pxLibrary(workers) {
     wn++;
     const wi = typeof r.i === 'number' ? r.i : wn;
     if (!r.s) continue;
-    const desk = pxTasks(r).desk, waits = !!waitText(r.s);
+    const tk = pxTasks(r), byTx = {};
     for (const it of (Array.isArray(r.s.items) ? r.s.items : [])) {
       const tx = pxTxt(it), o = it && typeof it === 'object' ? it : {};
       if (!tx || o.later) continue;
       const d = pxItemDate(it), key = pxTaskKey(r.p, tx), see = pxOutList(o.out).some(pxIsProduct) ? 1 : 0;
-      if (pxHidden.has(key)) continue;
-      if (o.done) { if (pxRecentDate(d)) done.push({ p: r.p, t: tx, d, key, see, today: d >= t0, wi }); }
-      else if (o.guy && waits) continue;
-      else if (!desk.includes(tx)) tasks.push({ p: r.p, t: tx, d, key, see, wi, stale: !d || Math.floor((Date.now() - d) / 864e5) > 3 });
+      if (o.done) { if (pxRecentDate(d) && !pxHidden.has(key)) done.push({ p: r.p, t: tx, d, key, see, today: d >= t0, wi }); }
+      else byTx[tx] = { d, see };
     }
+    for (const tx of tk.desk.concat(tk.shelf)) { const x = byTx[tx] || { d: null, see: 0 }, d = x.d;
+      tasks.push({ p: r.p, t: tx, d, key: pxTaskKey(r.p, tx), see: x.see, wi, now: tk.desk.includes(tx), stale: !d || Math.floor((Date.now() - d) / 864e5) > 3 }); }
   }
   const oldest = (a, b) => ((a.d ? +a.d : 0) - (b.d ? +b.d : 0)) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
   tasks.sort(oldest); done.sort(oldest);
@@ -1700,67 +1789,47 @@ function pxMailRack(x, y, reqs, byId) {
     const q = reqs[k];
     if (q) { const to = byId[q.q.to] || { emoji: '', color: '#38BDF8' };
       s += `<g><title>${esc((q.from.emoji || '') + ' ' + q.from.name + ' ← ' + ((to.emoji || '') + ' ' + (to.name || q.q.to)).trim() + ': ' + q.q.what)}</title>` +
-        `<rect x="${cx}" y="${cy + 1.2}" width="6.6" height="5.2" fill="${reqOld(q.q) ? '#FDE68A' : '#FFFFFF'}"/><rect x="${cx}" y="${cy + 1.2}" width="6.6" height="1" fill="${esc(pxTie(to))}"/>` +
-        `<path d="M${cx + .3},${cy + 2.3} l3,1.6 l3,-1.6" stroke="#C9CED6" stroke-width=".35" fill="none"/>` +
-        `<text x="${cx + 3.3}" y="${cy + 5.9}" text-anchor="middle" font-size="2.8">${esc(q.from.emoji || '')}</text></g>`; }
+        pxEnvelope(cx, +(cy + 1.2).toFixed(2), pxTie(to), reqOld(q.q), q.from.emoji) + `</g>`; }
   }
   return s + `</g>`;
 }
-// The library in the owner's room, 50 wide, 7 shelves (the owner, 22/11: "הסיפרייה קצת מבולגנת לי... יש יותר מדי פריטים בסיפריה
-// וזה הפך להיות לא יעיל", and "קלסר לכל עובד - ככל שיש יותר משימות פתוחות קלסר גדול יותר (עד גבול מסויים)"):
-// - The upper four: one binder per worker, for its open tasks of the last 3 days that are not on its desk, in the order of
-//   projects.json, so a binder never moves when another one is read. The more tasks, the wider the binder, up to 5; the number is on it.
-// - The next two, "מוכן לראות": what was finished today or yesterday and has an output to look at ("out"), with a green tick.
-// - The bottom one: the box "ישן", only a number: open tasks that did not change for more than 3 days, or have no date.
-// A red dot: a task in it the owner did not read yet; a blue corner: there is something to see. A click on a worker's binder
-// opens its tasks, on the box the old ones, elsewhere the whole list by worker. Each task keeps its own place for the flights
-// (put(key, place, x, y, p, svg, o)): one that leaves a desk flies to its worker's binder, or to the box.
-function pxShelf(x, y0, done, tasks, put) {
-  tasks = tasks || []; put = put || ((k, pl, a, b, p, s) => s);
-  const COL = 10, PITCH = 4.65, ROW = 8.6, OPEN_R = 4, SEE_R = 2, y = y0 + 7, H = 7 * ROW + 1, BW = 50;
-  const fresh = tasks.filter(t => !t.stale), stale = tasks.filter(t => t.stale), see = done.filter(d => d.see);
-  const groups = [], gi = {};
-  for (const t of fresh) { const id = t.p.id || t.p.name; if (!gi[id]) groups.push(gi[id] = { id, p: t.p, wi: t.wi, list: [] }); gi[id].list.push(t); }
-  groups.sort((a, b) => a.wi - b.wi);
-  const unread = fresh.concat(see).filter(tk => !pxRead.has(tk.key)).length;
-  let s = `<g class="who" data-act="open:shelf"><title>${esc('הספרייה: ' + (groups.length ? groups.length + ' עובדים עם ' + fresh.length + ' משימות מ־3 הימים האחרונים' : 'אין משימות פתוחות מ־3 הימים האחרונים') + ' · מוכן לראות: ' + see.length + ' · ישן: ' + stale.length + (unread ? ' · ' + unread + ' לא נקראו' : '') + ' · לחיצה: כל הרשימה')}</title>` + pxSign(x + BW / 2, y0, 'ספרייה', 28) +
-    `<rect x="${x}" y="${y}" width="${BW}" height="${H}" fill="#7A5236"/>` + Array.from({ length: 7 }, (_, i) => `<rect x="${x + 1}" y="${y + 1 + i * ROW}" width="${BW - 2}" height="7.6" fill="#4A2E1A"/>`).join('');
-  // A worker's binder: 4 wide for one task, 2 more for each other one, up to 12 (5 tasks). The sticker with the emoji in the
-  // middle, the number under it from 2 tasks.
-  const wOf = n => Math.min(4 + (n - 1) * 2, 12);
-  const big = (g, bx, by, w) => { const n = g.list.length, c = pxTie(g.p), un = g.list.some(t => !pxRead.has(t.key)), sx = +(bx + (w - 3) / 2).toFixed(2);
-    return `<g class="who" data-act="open:lib:${esc(g.id)}"><title>${esc((g.p.emoji || '') + ' ' + g.p.name + ': ' + n + (n === 1 ? ' משימה פתוחה' : ' משימות פתוחות') + '\n' + g.list.slice().reverse().slice(0, 5).map(t => '· ' + t.t.slice(0, 80)).join('\n') + (n > 5 ? '\n…' : '') + '\nלחיצה: המשימות של ' + g.p.name)}</title>` +
-      `<rect x="${bx}" y="${by}" width="${w}" height="7" fill="${c}"/><rect x="${bx}" y="${by}" width="${w}" height="1" fill="#000000" fill-opacity=".2"/>` +
-      (w >= 7 ? `<rect x="${bx + 1}" y="${by + 1}" width=".5" height="6" fill="#000000" fill-opacity=".12"/><rect x="${+(bx + w - 1.5).toFixed(2)}" y="${by + 1}" width=".5" height="6" fill="#000000" fill-opacity=".12"/>` : '') +
-      `<rect x="${sx}" y="${by + 1.5}" width="3" height="3" fill="#FFFFFF"/><text x="${sx + 1.5}" y="${by + 3.9}" text-anchor="middle" font-size="2.3">${esc(g.p.emoji || '')}</text>` +
-      (n > 1 ? `<text x="${+(bx + w / 2).toFixed(2)}" y="${by + 6.6}" text-anchor="middle" font-family="Heebo" font-size="2.1" font-weight="800" fill="#FFFFFF" stroke="#000000" stroke-width=".35" paint-order="stroke">${n}</text>` : '') +
-      (un ? pxUnread(+(bx + w - 4).toFixed(2), by) : '') + `</g>`; };
-  // The binders in rows, left to right, the next row when one does not fit. What has no room is counted under "+N" at the end.
-  let bx = x + 1.6, row = 0, over = 0;
-  for (const g of groups) {
-    const w = wOf(g.list.length);
-    if (bx + w > x + BW - 1.4) { row++; bx = x + 1.6; }
-    if (row >= OPEN_R) { over++; continue; }
-    const by = +(y + 1.6 + row * ROW).toFixed(2);
-    s += big(g, +bx.toFixed(2), by, w);
-    g.list.forEach(t => { put(t.key, 'lib', +(bx + w / 2 - 2).toFixed(2), by, t.p, '', { noSlide: true }); });
-    bx += w + .8;
-  }
-  if (over) s += `<text x="${x + BW - 3}" y="${y + 1.6 + (OPEN_R - 1) * ROW + 4.6}" text-anchor="middle" font-family="Heebo" font-size="2.6" font-weight="800" fill="#FFFFFF">+${over}</text>`;
-  // "מוכן לראות": a book per finished task with an output, the oldest first; where there is no room, "+N" in the first place.
-  const one = (tk, px, py) => `<g class="who" data-act="open:task:${esc(tk.key)}"><title>${esc((tk.p.emoji || '') + ' ' + tk.p.name + ' · נגמר: ' + tk.t + '\nיש בו מה לראות\nלחיצה: דף המשימה, עם התוצר')}</title>` +
-    pxBinder(px, py, tk.p, 7) + pxTick(px, py) + pxSee(px, py) + (pxRead.has(tk.key) ? '' : pxUnread(px, py)) + `</g>`;
-  const cap = SEE_R * COL, sOver = see.length > cap ? see.length - (cap - 1) : 0, at = j => ({ px: +(x + 1.6 + (j % COL) * PITCH).toFixed(2), py: +(y + 1.6 + (OPEN_R + Math.floor(j / COL)) * ROW).toFixed(2) });
-  see.forEach((tk, k) => { const { px, py } = at(sOver ? Math.max(0, k - sOver + 1) : k); s += put(tk.key, 'done', px, py, tk.p, !sOver || k >= sOver ? one(tk, px, py) : ''); });
-  if (sOver) { const { px, py } = at(0); s += `<text x="${px + 2}" y="${py + 4.6}" text-anchor="middle" font-family="Heebo" font-size="2.6" font-weight="800" fill="#FFFFFF">+${sOver}</text>`; }
-  // The box "ישן" on the bottom shelf: a cardboard box with the number on it. With nothing old, no box.
-  const kx = x + 1.6, ky = +(y + 1.6 + (OPEN_R + SEE_R) * ROW).toFixed(2);
-  stale.forEach(t => { put(t.key, 'old', kx + 5, ky, t.p, '', { noSlide: true }); });
-  if (stale.length) s += `<g class="who" data-act="open:old"><title>${esc('ישן: ' + stale.length + (stale.length === 1 ? ' משימה פתוחה' : ' משימות פתוחות') + ' שלא זזו יותר מ־3 ימים\nלחיצה: הרשימה')}</title>` +
-    `<rect x="${kx}" y="${ky + .6}" width="14" height="6.4" fill="#B7865A"/><rect x="${kx}" y="${ky + .6}" width="14" height="1.2" fill="#D2A679"/><rect x="${kx + 6.6}" y="${ky + .6}" width=".8" height="1.2" fill="#8A6240"/>` +
-    `<text x="${kx + 7}" y="${ky + 5.9}" text-anchor="middle" font-family="Heebo" font-size="2.4" font-weight="800" fill="#3B2A1A">ישן ${stale.length}</text></g>`;
+// The library in the owner's room, 50 wide, 7 shelves: only the finished tasks (the owner, 22/11: "הסיפריה והקלסרים עדיין מסובכים
+// לי. בסיפריה צריכות להופיע רק משימות שהסתיימו"): a binder per task finished today or yesterday, in its worker's color, with a green
+// tick; a blue corner when it has something to look at (a link, a picture, a video, a sound or a PDF); a red dot until the owner reads
+// it. The oldest first, so a binder never moves when another one is read; where there is no room, the oldest go under "+N" in the
+// first place. A click on a binder opens its task, elsewhere on the library the list. The open tasks lie on their workers' desks.
+function pxShelf(x, y0, done, put) {
+  put = put || ((k, pl, a, b, p, s) => s);
+  const COL = 10, PITCH = 4.65, ROW = 8.6, ROWS = 7, y = y0 + 7, H = ROWS * ROW + 1, BW = 50;
+  const see = done.filter(d => d.see).length, unread = done.filter(d => !pxRead.has(d.key)).length;
+  let s = `<g class="who" data-act="open:shelf"><title>${esc('הספרייה: ' + (done.length ? done.length + (done.length === 1 ? ' משימה שנגמרה' : ' משימות שנגמרו') + ' היום ואתמול' : 'עוד לא נגמרה משימה היום או אתמול') + (see ? ' · ' + see + ' עם משהו לראות' : '') + (unread ? ' · ' + unread + ' לא נקראו' : '') + ' · לחיצה: הרשימה')}</title>` + pxSign(x + BW / 2, y0, 'ספרייה', 28) +
+    `<rect x="${x}" y="${y}" width="${BW}" height="${H}" fill="#7A5236"/>` + Array.from({ length: ROWS }, (_, i) => `<rect x="${x + 1}" y="${y + 1 + i * ROW}" width="${BW - 2}" height="7.6" fill="#4A2E1A"/>`).join('');
+  const one = (tk, px, py) => `<g class="who" data-act="open:task:${esc(tk.key)}"><title>${esc((tk.p.emoji || '') + ' ' + tk.p.name + ' · נגמר: ' + tk.t + (tk.see ? '\nיש בו מה לראות' : '') + '\nלחיצה: דף המשימה')}</title>` +
+    pxBinder(px, py, tk.p, 7) + pxTick(px, py) + (tk.see ? pxSee(px, py) : '') + (pxRead.has(tk.key) ? '' : pxUnread(px, py)) + `</g>`;
+  const cap = ROWS * COL, over = done.length > cap ? done.length - (cap - 1) : 0, at = j => ({ px: +(x + 1.6 + (j % COL) * PITCH).toFixed(2), py: +(y + 1.6 + Math.floor(j / COL) * ROW).toFixed(2) });
+  done.forEach((tk, k) => { const { px, py } = at(over ? Math.max(0, k - over + 1) : k); s += put(tk.key, 'done', px, py, tk.p, !over || k >= over ? one(tk, px, py) : ''); });
+  if (over) { const { px, py } = at(0); s += `<text x="${px + 2}" y="${py + 4.6}" text-anchor="middle" font-family="Heebo" font-size="2.6" font-weight="800" fill="#FFFFFF">+${over}</text>`; }
   return s + `</g>`;
 }
+// All of a worker's open tasks lie on its desk until they are done (the owner, 22/11: "על השולחן של כל עובד נשארת משימה עד שהיא
+// גמורה. קלסר למשימה", "צריך לראות את כל הקלסרים בערימה על השולחן - ככל שיש יותר קלסרים ככה הערימה שלו גדלה ונהיה בלגן על
+// השולחן. אם צריך תגדיל מעט את אורך השולחן"): the one worked on now lies open in front of the worker; every other one is a closed
+// binder in a pile, each a little off the one under it, and now and then one turned a little: a mess. Up to 9 in a pile: the first
+// pile on the desk's left wing (a desk is 36 long since 22/11, was 30), the second in front of the screen, the third in the middle.
+const PX_PILE = 9, PX_DESK_EXT = 6;
+function pxPileAt(dx, dy, i, key, fixed) {
+  const h = pxHash(key), pile = Math.min(2, Math.floor(i / PX_PILE)), j = i - pile * PX_PILE;
+  const X = fixed ? [dx + .4, dx + 20.5, dx + 11] : [dx - 5.6, dx + 20.5, dx + 11.5];
+  return { x: +(X[pile] + ((h % 9) - 4) * .45).toFixed(2), y: +(dy + 4.2 - j * 2).toFixed(1), rot: h % 3 === 0 ? ((h >> 3) % 2 ? 8 : -8) : 0, pile };
+}
+// A closed binder lying on a desk, in the worker's color, with its label and the rings' edge.
+const pxLying = (x, y, p, rot) => `<g${rot ? ` transform="rotate(${rot} ${+(x + 4.2).toFixed(2)} ${+(y + .9).toFixed(2)})"` : ''}><rect x="${+(x + .3).toFixed(2)}" y="${+(y + 1.8).toFixed(2)}" width="8.4" height=".45" fill="#24180E" fill-opacity=".28"/><rect x="${x}" y="${y}" width="8.4" height="1.8" fill="${esc(pxTie(p))}"/><rect x="${x}" y="${y}" width="8.4" height=".4" fill="#FFFFFF" fill-opacity=".35"/>` +
+  `<rect x="${+(x + 7.6).toFixed(2)}" y="${+(y + .3).toFixed(2)}" width=".8" height="1.3" fill="#FFFFFF" fill-opacity=".85"/><rect x="${+(x + 2.6).toFixed(2)}" y="${+(y + .45).toFixed(2)}" width="2.4" height=".9" fill="#FFFFFF"/><rect x="${x}" y="${+(y + 1.6).toFixed(2)}" width="8.4" height=".2" fill="#000000" fill-opacity=".3"/></g>`;
+// A little shadow under a thing on a desk (the owner, 22/11: "טיפה הצללה שתהיה הפרדה ויראו את האובייקטים יותר טוב", then "ההצללה לא
+// יפה" about a dark copy behind the things): a thin strip where it stands, from x0 to x1 at its foot y, a little to the right; with h,
+// also a thin strip on its right side, h high. A binder lying in a pile has its own (pxLying).
+const pxDrop = (x0, x1, y, h) => `<rect x="${+(x0 + .3).toFixed(2)}" y="${+y.toFixed(2)}" width="${+(x1 - x0).toFixed(2)}" height=".45" fill="#24180E" fill-opacity=".28"/>` +
+  (h ? `<rect x="${+x1.toFixed(2)}" y="${+(y - h + .5).toFixed(2)}" width=".35" height="${+(h - .05).toFixed(2)}" fill="#24180E" fill-opacity=".2"/>` : '');
 // The day clock on the owner's wall. It took the whiteboard's place (the owner, 16/11: "מה נותן הלוח הלבן במשרד של המנהל? מרגיש
 // מיותר - אולי אפשר שיתן משהו חדש שעוזר ולא עוד רשימות", and "1"): today's 24 hours as a bar, with the owner's fixed hours on it
 // (CONFIG.windows: the headlines on air, the radio PC's hours, the farm's midnight), a pin in the worker's color for each thing
@@ -1938,7 +2007,8 @@ function pxCloseup(kind, c) {
     body = `<div class="head" style="--c:${esc(col)}"><span class="em">${esc(r.p.emoji || '')}</span><div><h3>${esc(r.p.name)}</h3><div class="st">${esc(st)}${s.updatedAt ? ' · עודכן ' + esc(stamp(s.updatedAt)) : ''}</div></div></div>` +
       (s.now ? `<p class="now">${esc(String(s.now))}</p>` : '') +
       sec('מחכה לך', guy.length ? guy.map(t => `<div class="binder"><span class="spine" style="background:${esc(col)}"></span><div class="what">${esc(t)}</div></div>`).join('') : '') +
-      sec('על השולחן עכשיו', tlist(pxTasks(r).desk)) + sec('משימות פתוחות', tlist(pxTasks(r).shelf)) + sec('נגמר', tlist(items.filter(it => it && typeof it === 'object' && it.done).map(txt).filter(Boolean))) + sec('נדחה', list(later)) +
+      sec('מסמכים על השולחן', (d => d.length ? `<ul>${d.map(t => `<li><a href="${esc(t.url || pxFileHref(t.path))}" target="_blank" rel="noopener">${esc(t.name)}</a></li>`).join('')}</ul>` : '')(pxDeskDocs(r))) +
+      sec('בעבודה עכשיו', tlist(pxTasks(r).desk)) + sec('על השולחן', tlist(pxTasks(r).shelf)) + sec('נגמר', tlist(items.filter(it => it && typeof it === 'object' && it.done).map(txt).filter(Boolean))) + sec('נדחה', list(later)) +
       sec('סיים לאחרונה', s.lastDone ? `<p>${esc(String(s.lastDone))}</p>` : '') +
       sec('קבצים משותפים', list((Array.isArray(s.touching) ? s.touching : []).filter(f => typeof f === 'string'))) +
       sec('בקשות לעובדים אחרים', list((Array.isArray(s.requests) ? s.requests : []).filter(q => q && q.to && q.what).map(q => q.to + ': ' + q.what))) +
@@ -1948,7 +2018,7 @@ function pxCloseup(kind, c) {
     // A binder's own page: the task, where it is, and its output (a link, a file or document, an answer).
     const k = kind.slice(5), x = (c.taskByKey || {})[k]; if (!x) return '';
     const it = x.it || {}, s = x.r.s || {}, col = pxTie(x.p), outs = pxOuts(it.out, 'product'), recs = pxOuts(it.out, 'record');
-    const where = it.done ? 'נגמר' : it.guy ? 'מחכה לך' : it.later ? 'נדחה' : x.desk ? 'פתוח על השולחן: בעבודה עכשיו' : 'משימה פתוחה';
+    const where = it.done ? 'נגמר' : it.guy ? 'מחכה לך' : it.later ? 'נדחה' : x.desk ? 'פתוח על השולחן: בעבודה עכשיו' : 'על השולחן, בערימה';
     const when = pxItemDate(it);
     cls = 'cu-worker';
     body = `<div class="head" style="--c:${esc(col)}"><span class="em">${esc(x.p.emoji || '')}</span><div><h3>${esc(x.t)}</h3><div class="st">${who(x.p)} · ${esc(where)}${when ? ' · ' + esc(it.at ? stamp(it.at) : when.getDate() + '/' + (when.getMonth() + 1)) : ''}</div></div></div>` +
@@ -1956,7 +2026,7 @@ function pxCloseup(kind, c) {
       (recs ? `<div class="sec"><h4>${it.done ? 'סיום המשימה' : 'עד עכשיו'}</h4><ul class="out">${recs}</ul></div>` : '') +
       (outs || recs ? '' : `<div class="sec"><p>${it.done ? 'נגמר, בלי תוצר.' : 'עוד אין תוצר.'}</p></div>`) +
       (x.now ? '<div class="sec"><p>זו המשימה של עכשיו, מתוך now. אין לה פריט משלה.</p></div>' : '') +
-      `<div class="foot"><button class="cu-link" data-act="read:${esc(k)}">${pxRead.has(k) ? 'לסמן שלא נקרא' : 'לסמן שנקרא'}</button> · <button class="cu-link" data-act="open:w:${esc(x.p.id)}">החלון של ${esc(x.p.name)}</button> · <button class="cu-link" data-act="open:shelf">כל הספרייה</button>${it.guy || it.later || x.now ? '' : ` · <button class="cu-link" data-act="hide:${esc(k)}">${pxHidden.has(k) ? 'להחזיר לספרייה' : 'להוריד מהספרייה'}</button>`}</div>`;
+      `<div class="foot"><button class="cu-link" data-act="read:${esc(k)}">${pxRead.has(k) ? 'לסמן שלא נקרא' : 'לסמן שנקרא'}</button> · <button class="cu-link" data-act="open:w:${esc(x.p.id)}">החלון של ${esc(x.p.name)}</button> · ${it.done ? `<button class="cu-link" data-act="open:shelf">כל הספרייה</button> · <button class="cu-link" data-act="hide:${esc(k)}">${pxHidden.has(k) ? 'להחזיר לספרייה' : 'להוריד מהספרייה'}</button>` : `<button class="cu-link" data-act="open:lib:${esc(x.p.id)}">השולחן של ${esc(x.p.name)}</button>`}</div>`;
   } else if (kind.startsWith('note:')) {
     const k = +kind.slice(5), it = c.later[k]; if (!it) return '';
     const col = pxTint(pxTie(it.p), .66);
@@ -1993,29 +2063,35 @@ function pxCloseup(kind, c) {
     body = `<div class="col"><h3 class="blue">היום · ${pxClockHM(now)}</h3><p class="now">${act.length ? 'עכשיו: ' + esc(act.map(w => w.text).join(' · ')) : 'עכשיו אין מגבלה'}</p>` +
       `<h3>השעות הקבועות</h3>` + (wins.length ? `<ul>${wins.map(w => `<li${pxWinNow(w, nm) ? ' class="ask"' : ''}><span style="color:${esc(w.color || '#9CA3AF')}">▮</span> ${esc(w.from)}–${esc(w.to)}: ${esc(w.text)}</li>`).join('')}</ul>` : '<p>אין שעות קבועות.</p>') +
       `<h3>מה נקבע להיום</h3>` + (sched.length ? `<ul>${sched.map(e => `<li${e.d < now ? ' style="opacity:.6"' : ''}>${pxClockHM(e.d)} · ${whoId(e.id)}: ${esc(e.text)}</li>`).join('')}</ul>` : '<p>לא נקבע כלום להיום.</p>') + `</div>`;
-  } else if (kind === 'shelf' || kind === 'old' || kind.startsWith('lib:')) {
-    // The library's list (22/11): by worker, in the order of projects.json; in each, the new ones first, the old ones after them.
-    // "lib:<id>": one worker's binder. "old": the box, only what did not change for more than 3 days.
-    // Quick to read (the owner, 22/11: "זה ממש לא מונגש להבנה מהירה"): one short line per task, the date at its end, a red dot
-    // when not read yet; the whole text on the task's page. Sections: open, ready to see (a product), done.
+  } else if (kind === 'shelf' || kind.startsWith('lib:')) {
+    // The lists (22/11). "shelf", the library: only what was finished, by worker in the order of projects.json (the owner: "בסיפריה
+    // צריכות להופיע רק משימות שהסתיימו"). "lib:<id>", a worker's desk: its open tasks (the one worked on now first, then the newest),
+    // and what it finished. Quick to read (the owner, 22/11: "זה ממש לא מונגש להבנה מהירה"): one short line per task, the date at its
+    // end, a red dot when not read yet; the whole text on the task's page.
     cls = 'cu-lib';
-    const only = kind.startsWith('lib:') ? kind.slice(4) : null, oldOnly = kind === 'old', idOf = d => d.p.id || d.p.name;
-    const tks = (c.tasks || []).filter(d => (!only || idOf(d) === only) && (!oldOnly || d.stale));
+    const only = kind.startsWith('lib:') ? kind.slice(4) : null, idOf = d => d.p.id || d.p.name;
+    const tks = only ? (c.tasks || []).filter(d => idOf(d) === only) : [];
     const short = t => { t = String(t).replace(/\s+/g, ' ').trim(); return t.length > 72 ? t.slice(0, 70).replace(/\s+\S*$/, '') + '…' : t; };
     const day = d => d ? d.getDate() + '/' + (d.getMonth() + 1) : '';
-    const row = (d, fin) => `<li data-act="open:task:${esc(d.key)}" title="${esc(d.t)}"><i class="${pxRead.has(d.key) ? 'r' : ''}"></i>${fin ? '<span class="ok">✓</span>' : ''}<span class="lt">${esc(short(d.t))}</span>${d.see ? '<span class="lb">▶ לראות</span>' : ''}<span class="ld${!fin && d.stale ? ' old' : ''}">${esc(day(d.d))}</span></li>`;
-    const newest = (a, b) => (b.d ? +b.d : 0) - (a.d ? +a.d : 0);
-    const ord = list => list.filter(d => !d.stale).sort(newest).concat(list.filter(d => d.stale).sort(newest));
+    const row = (d, fin) => `<li data-act="open:task:${esc(d.key)}" title="${esc(d.t)}"><i class="${pxRead.has(d.key) ? 'r' : ''}"></i>${fin ? '<span class="ok">✓</span>' : d.now ? '<span class="lb">עכשיו</span>' : ''}<span class="lt">${esc(short(d.t))}</span>${d.see ? '<span class="lb">▶ לראות</span>' : ''}<span class="ld${!fin && d.stale ? ' old' : ''}">${esc(day(d.d))}</span></li>`;
+    const newest = (a, b) => (b.now ? 1 : 0) - (a.now ? 1 : 0) || (b.d ? +b.d : 0) - (a.d ? +a.d : 0);
     const byW = list => { const gs = [], gi = {}; for (const d of list) { const id = idOf(d); if (!gi[id]) gs.push(gi[id] = { p: d.p, wi: d.wi, list: [] }); gi[id].list.push(d); } return gs.sort((a, b) => a.wi - b.wi); };
-    const block = (list, fin) => only ? `<ul class="lst">${(fin ? list : ord(list)).map(d => row(d, fin)).join('')}</ul>`
-      : byW(list).map(g => `<div class="lw"><span class="sw" style="background:${esc(pxTie(g.p))}"></span>${who(g.p)}</div><ul class="lst">${(fin ? g.list : ord(g.list)).map(d => row(d, fin)).join('')}</ul>`).join('');
-    const dn = oldOnly ? [] : (c.done || []).filter(d => !only || idOf(d) === only), seeL = dn.filter(d => d.see), rest = dn.filter(d => !d.see);
-    const head = only ? (c.rowsById[only] ? who(c.rowsById[only].p) : esc(only)) : oldOnly ? 'ישן: לא זזו יותר מ־3 ימים' : 'הספרייה';
+    const block = (list, fin) => only ? `<ul class="lst">${(fin ? list : list.slice().sort(newest)).map(d => row(d, fin)).join('')}</ul>`
+      : byW(list).map(g => `<div class="lw"><span class="sw" style="background:${esc(pxTie(g.p))}"></span>${who(g.p)}</div><ul class="lst">${g.list.map(d => row(d, fin)).join('')}</ul>`).join('');
+    const dn = (c.done || []).filter(d => !only || idOf(d) === only), seeL = dn.filter(d => d.see), rest = dn.filter(d => !d.see);
+    const head = only ? (c.rowsById[only] ? who(c.rowsById[only].p) + ' · השולחן' : esc(only)) : 'הספרייה · מה שנגמר היום ואתמול';
     body = `<h3>${head}</h3>` +
-      `<h4>פתוח · ${tks.length}</h4>` + (tks.length ? block(tks, false) : '<p class="none">אין</p>') +
+      (only ? `<h4>על השולחן · ${tks.length}</h4>` + (tks.length ? block(tks, false) : '<p class="none">אין</p>') : '') +
       (seeL.length ? `<h4>מוכן לראות · ${seeL.length}</h4>` + block(seeL, true) : '') +
-      (rest.length ? `<h4>נגמר · ${rest.length}</h4>` + block(rest, true) : '') +
-      `<div class="foot">${only || oldOnly ? `<button class="cu-link" data-act="open:shelf">כל הספרייה</button>` : ''}${only ? ` · <button class="cu-link" data-act="open:w:${esc(only)}">החלון של העובד</button>` : ''}${pxHidden.size ? `${only || oldOnly ? ' · ' : ''}<button class="cu-link" data-act="unhide-all">הורדו ${pxHidden.size} · להחזיר</button>` : ''}</div>`;
+      (rest.length ? `<h4>נגמר · ${rest.length}</h4>` + block(rest, true) : '') + (only || dn.length ? '' : '<p class="none">עוד לא נגמרה משימה היום או אתמול</p>') +
+      `<div class="foot">${only ? `<button class="cu-link" data-act="open:w:${esc(only)}">החלון של העובד</button> · <button class="cu-link" data-act="open:shelf">הספרייה</button>` : ''}${pxHidden.size ? `${only ? ' · ' : ''}<button class="cu-link" data-act="unhide-all">הורדו ${pxHidden.size} · להחזיר</button>` : ''}</div>`;
+  } else if (kind.startsWith('docs:')) {
+    // The documents on a worker's desk (its "desk"): one line each, its name as a link that opens it, and its date.
+    const r = c.rowsById[kind.slice(5)]; if (!r) return '';
+    const docs = pxDeskDocs(r);
+    cls = 'cu-lib';
+    body = `<h3>${who(r.p)} · מסמכים על השולחן</h3>` + (docs.length ? `<ul class="lst">${docs.map(t => `<li title="${esc(t.path || t.url)}"><a class="lt" href="${esc(t.url || pxFileHref(t.path))}" target="_blank" rel="noopener">${esc(t.name)}</a><span class="ld">${t.at ? t.at.getDate() + '/' + (t.at.getMonth() + 1) : ''}</span></li>`).join('')}</ul>` : '<p class="none">אין מסמכים על השולחן</p>') +
+      `<div class="foot"><button class="cu-link" data-act="open:w:${esc(r.p.id)}">החלון של ${esc(r.p.name)}</button></div>`;
   } else if (kind === 'mail') {
     cls = 'cu-cab';
     body = `<h3>חדר הדואר · בקשות בין עובדים</h3>` + (c.reqs.length ? `<ul>${c.reqs.map(({ from, q }) => `<li>${who(from)} ← ${esc(q.to)}: ${esc(q.what)}${reqTag(q) ? ` <span class="old">⏳ ${esc(reqTag(q))}</span>` : ''}</li>`).join('')}</ul>` : '<p>אין בקשות פתוחות.</p>');
@@ -2033,10 +2109,10 @@ function pxCloseup(kind, c) {
     cls = 'cu-help';
     body = `<h3>מה כל דבר במשרד אומר</h3><ul>` + [
       ['עובד ליד השולחן ומקליד', 'עובד עכשיו'], ['על כיסאות ההמתנה ליד החדר שלך', 'מחכה לך'], ['בפינת הקפה', 'לא עובד עכשיו. שעון חול: ממתין, כלומר מחכה למשהו אחר ולא לך. ✓: סיים. כשאין כיסא פנוי, עומדים בזוגות ומדברים'],
-      ['המגש על השולחן שלך', 'קלסר לכל שאלה שמחכה לך. לחיצה על השולחן פותחת את המגש, ולחיצה על שאלה פותחת אותה עם כפתורי תשובה. התשובה נשמרת בתיקייה של עזרא, והוא מעביר אותה לעובד תוך 30 דקות. אישור להתקין, למחוק או לאתחל נשאר בשיחה של העובד'], ['קלסר, בצבע של העובד', 'משימה. פתוח על השולחן: עובדים עליה עכשיו. במגש שלך: מחכה לך. בספרייה: קלסר אחד לכל עובד, עם המשימות הפתוחות שלו. כשהמקום של משימה משתנה, קלסר קטן עף לשם'], ['טלפון אדום מתנדנד', 'משהו חשוב, כמו "לא לאתחל"'], 
-      ['פתק על לוח השעם', 'דבר שנדחה, בצבע של העובד: נייר בגוון בהיר של הצבע שלו, ופס בצבע עצמו למעלה'], ['שעון היום בחדר שלך', 'שעון של 24 שעות: השעות הקבועות שלך בצבע על השעון, נקודה בצבע של העובד לכל דבר שנקבע להיום, ומחוג של עכשיו. השלט מתחת: מה בתוקף עכשיו. לחיצה: היום'], ['הספרייה בחדר שלך', 'למעלה: קלסר לכל עובד, עם המשימות הפתוחות שלו מ־3 הימים האחרונים. יותר משימות, קלסר רחב יותר (עד 5), והמספר עליו. מתחת, עם ✓ ופינה כחולה: מוכן לראות, מה שנגמר היום או אתמול ויש לו תוצר. למטה: הארגז ישן, משימות שלא זזו יותר מ־3 ימים. נקודה אדומה: יש משימה שעוד לא קראת. לחיצה על קלסר: המשימות של העובד. על הארגז: הישנות. על הספרייה: הכול'], ['הארון', 'קבצים משותפים; אדום כשיש התנגשות'], ['תאי הדואר ומעטפה כחולה', 'בקשה בין עובדים. על המעטפה הסמל של מי ששלח, והפס בצבע של מי שהיא בשבילו. צהובה: לא זזה יומיים'],
-      ['הטלוויזיה', 'העדכונים האחרונים'], ['קנקן קפה / קנקן תה', 'יום / שבוע: מה שנשאר מהחלק של היום / מהמכסה השבועית'], ['החלון והשעון הדיגיטלי', 'מזג האוויר, השעה והתאריך בעיר שלך'], ['מפת המשרד', 'המקרא הזה'], ['שעון הנוכחות', 'כמה כל עובד עבד היום'], ['המעלית', 'המחסן של הארכיון. עובד חדש יוצא ממנה בצלצול, ומי שעובר לארכיון נכנס אליה'], ['צלילים', 'לכל אירוע צליל: מתיישב לעבוד (הקלדה), הולך לקפה (כוסות), מתיישב על הספסל (כיסא), משהו חדש מחכה לך (צליל), קלסר עף (משב), משימה נגמרה (שלושה צלילים עולים), בקשה בין עובדים (נייר), פתק חדש על לוח השעם (נעץ), הטלפון האדום (צלצול), עזרא דופק בדלת (דפיקות), הגיעה שעה שנקבעה להיום (פעמון), המעלית (צלצול) ומי שעובר לארכיון (חצוצרה עצובה). הכפתור למעלה מכבה ומדליק']
-    ].map(([a, b]) => `<li><b>${esc(a)}</b>: ${esc(b)}</li>`).join('') + `</ul>` +
+      ['המגש על השולחן שלך', 'קלסר לכל שאלה שמחכה לך. לחיצה על השולחן פותחת את המגש, ולחיצה על שאלה פותחת אותה עם כפתורי תשובה. התשובה נשמרת בתיקייה של עזרא, והוא מעביר אותה לעובד תוך 30 דקות. אישור להתקין, למחוק או לאתחל נשאר בשיחה של העובד'], ['קלסר, בצבע של העובד', 'משימה. פתוח לפני העובד: עובדים עליה עכשיו. בערימה על השולחן: פתוחה, עד שהיא נגמרת. במגש שלך: מחכה לך. בספרייה: נגמרה. כשהמקום של משימה משתנה, קלסר קטן עף לשם'], ['תיקייה על שולחן', 'מסמכים שהעובד הכין לך, עם קישורים. נשארים עד שתבקש ממנו להעיף'], ['טלפון אדום מתנדנד', 'משהו חשוב, כמו "לא לאתחל"'], 
+      ['פתק על לוח השעם', 'דבר שנדחה, בצבע של העובד: נייר בגוון בהיר של הצבע שלו, ופס בצבע עצמו למעלה'], ['שעון היום בחדר שלך', 'שעון של 24 שעות: השעות הקבועות שלך בצבע על השעון, נקודה בצבע של העובד לכל דבר שנקבע להיום, ומחוג של עכשיו. השלט מתחת: מה בתוקף עכשיו. לחיצה: היום'], ['הספרייה בחדר שלך', 'רק מה שנגמר היום ואתמול: קלסר עם ✓ לכל משימה. פינה כחולה: יש מה לראות. נקודה אדומה: עוד לא קראת. לחיצה על קלסר: המשימה. על הספרייה: הרשימה'], ['הארון', 'קבצים משותפים; אדום כשיש התנגשות'], ['תאי הדואר ומעטפה כחולה', 'בקשה בין עובדים. על המעטפה הסמל של מי ששלח, והפס בצבע של מי שהיא בשבילו. צהובה: לא זזה יומיים'],
+      ['הטלוויזיה', 'העדכונים האחרונים'], ['קנקן קפה / קנקן תה', 'יום / שבוע: מה שנשאר מהחלק של היום / מהמכסה השבועית'], ['כוסות וקאפקייק על השולחן של עובד', { html: pxEffortTable() }], ['החלון והשעון הדיגיטלי', 'מזג האוויר, השעה והתאריך בעיר שלך'], ['מפת המשרד', 'המקרא הזה'], ['שעון הנוכחות', 'כמה כל עובד עבד היום'], ['המעלית', 'המחסן של הארכיון. עובד חדש יוצא ממנה עם קרטון, והקרטון נפתח לשולחן שלו. מי שעובר לארכיון מקפל את השולחן לקרטון ונכנס איתו אליה. עזרא מלווה אותם'], ['צלילים', 'לכל אירוע צליל: מתיישב לעבוד (הקלדה), הולך לקפה (כוסות), מתיישב על הספסל (כיסא), משהו חדש מחכה לך (צליל), קלסר עף (משב), משימה נגמרה (שלושה צלילים עולים), בקשה בין עובדים (נייר), פתק חדש על לוח השעם (נעץ), הטלפון האדום (צלצול), עזרא דופק בדלת (דפיקות), הגיעה שעה שנקבעה להיום (פעמון), המעלית (צלצול) ומי שעובר לארכיון (חצוצרה עצובה). הכפתור למעלה מכבה ומדליק']
+    ].map(([a, b]) => typeof b === 'string' ? `<li><b>${esc(a)}</b>: ${esc(b)}</li>` : `<li><b>${esc(a)}</b>: רמת המאמץ של השיחה שלו<div class="efft">${b.html}</div></li>`).join('') + `</ul>` +
       // Every sound can be heard here (the owner, 16/11: "מה עם הצלילים? מה הוסף?").
       `<h3>לשמוע את הצלילים</h3><p>` + [['type', 'מתיישב לעבוד'], ['cup', 'הולך לקפה'], ['sit', 'מתיישב על הספסל'], ['chime', 'משהו מחכה לך'], ['whoosh', 'קלסר עף'], ['done', 'משימה נגמרה'], ['mail', 'בקשה בין עובדים'], ['tack', 'פתק חדש'], ['ring', 'הטלפון האדום'], ['knock', 'עזרא דופק בדלת'], ['bell', 'הגיעה שעה שנקבעה'], ['ding', 'המעלית'], ['trombone', 'לארכיון']]
         .map(([n, l]) => `<button class="cu-link" data-act="sfx:${n}">🔊 ${l}</button>`).join(' · ') + `</p><p>הדפדפן משמיע צלילים רק אחרי לחיצה בדף, גם אחרי כל רענון אוטומטי של הלוח. כשהכפתור למעלה כתוב "לחץ להפעלת צליל", לחיצה אחת בכל מקום בדף מפעילה אותם.</p>`;
@@ -2049,11 +2125,18 @@ function officeScene(workers, ezra, forGuy, sList, reqs, later, usage, events, a
   // The owner's room, the waiting chairs, the cabinet and the lift stay at the right end, moved by RX.
   // A worker whose projects.json row says "desk": "punch" has a fixed desk of its own, above the punch clock (the owner, 17/11:
   // "יהיה לו שולחן קבוע מעל השעון נוכחות"). Only one such desk; the others fill the rows as before.
-  const fixedR = workers.find(r => r.p && r.p.desk === 'punch'), grid = workers.filter(r => r !== fixedR);
+  // One who is leaving for the archive keeps its place until its desk is folded and it is in the lift, so no desk moves under it.
+  const ghosts = Object.values(pxLeaving).map(g => g.row || (g.row = { p: g.p, i: g.i, ghost: true }));
+  const slots = ghosts.length ? workers.concat(ghosts).sort((a, b) => (a.i || 0) - (b.i || 0)) : workers;
+  const fixedR = slots.find(r => r.p && r.p.desk === 'punch'), grid = slots.filter(r => r !== fixedR);
   const fit = pxFit(grid.length, !!fixedR), COLS = fit.c, W = fit.W, RX = W - 240, ROWS = Math.max(1, Math.ceil(grid.length / COLS));
   // One row of 4 or more desks is set in a zigzag: every other desk a little lower, so it is not one long line.
   // The coffee corner (K) starts right under the desks; the right side needs at least 140 high.
   const ZIG = ROWS === 1 && COLS >= 4 ? 18 : 0, K = ROWS * 52 + 64 + ZIG, H = Math.max(K + 54, fixedR ? 218 : 170);
+  // Another layout (the window's size, or one worker more or less) moves the desks: a box still opening shows its desk at once.
+  const layout = W + 'x' + H + ':' + COLS + ':' + grid.length;
+  if (pxLayout && pxLayout !== layout) pxBox = {};
+  pxLayout = layout;
   // Where a worker's desk is. The fixed one stands above the punch clock (drawn at RX + 186, H - 32), a little away from it (the
   // owner, 17/11: "תזיז קצת את השולחן שלך למעלה"), with its aisle on its left, so its walks do not pass in front of the cabinet.
   const deskAt = r => { if (r === fixedR) return { dx: RX + 185, dy: H - 74, ax: RX + 182 };
@@ -2086,7 +2169,12 @@ function officeScene(workers, ezra, forGuy, sList, reqs, later, usage, events, a
     return pxShowFrom(f.t1, svg);
   };
   // Idle and done: the coffee corner. Waiting for the owner: the bench outside the owner's room (the binders are in his tray).
-  const lounge = workers.filter(r => ['idle', 'done'].includes(pxState(r))).map(r => ({ r, st: pxState(r) }));
+  // Bina is not always in the coffee corner (the owner, 22/11: "בינה לא תמיד בקפה. לפעמים יושבת על השולחן ועושה ציפורניים"): in two
+  // of every five 5-minute stretches she sits at her desk doing her nails; and in the corner "היא אף פעם לא לבד", so also whenever
+  // nobody else is there.
+  const idleR = workers.filter(r => ['idle', 'done'].includes(pxState(r))), binaI = idleR.find(r => r.p.figure === 'bina');
+  const nailsId = binaI && (idleR.length < 2 || [2, 4].includes(Math.floor(Date.now() / 300000) % 5)) ? binaI.p.id : null;
+  const lounge = idleR.filter(r => r.p.id !== nailsId).map(r => ({ r, st: pxState(r) }));
   // Bina in the coffee corner (the owner, 17/11: "כשבינה בעמדת קפה יהיו לפחות 2 אנשים עומדים לידה לדבר (בשביל הפאן)"; "למה העובדים
   // סביבה מדומים?" and "א": only real workers; then "למה כולם עליה?"): she stands inside the corner, in a standing spot between the
   // first two tables, and two of the real workers in the corner stand with her and talk. Every two minutes one of them goes back to
@@ -2116,6 +2204,47 @@ function officeScene(workers, ezra, forGuy, sList, reqs, later, usage, events, a
     return { sx: s.x, y: s.y, tx: s.x + [5, -5, -4][k], ty: s.y + [2, -2, 3][k], dur: [11, 13, 12][k], role: 'chat', b: pxSince[id] != null ? pxSince[id] : -(k * 3 + 1) }; };
   const deskToBench = (d, b) => d.ax >= 140 + RX ? [[d.x, d.y], [d.ax, d.y], [d.ax, b.y], [b.x, b.y]]
     : [[d.x, d.y], [d.ax, d.y], [d.ax, YC], [HUBX, YC], [HUBX, b.y], [b.x, b.y]];
+  // Where a worker stands beside its desk to open its box or to fold its desk: in its aisle; at the fixed desk (its aisle is on the
+  // desk's left), a little further left, clear of the desk.
+  const standAt = d => d.ax > d.x ? { x: d.ax, y: d.y } : { x: d.x - 28, y: d.y, left: true };
+  // Ezra's spot (his home, by the owner's door) and his lanes. He walks along the office's lanes, as the workers do, and never
+  // through a wall (the owner, 15/11: "המסלול של עזרא עובר דרך הקיר"): from the right side (his door, the bench) along the floor to
+  // the aisle right under the lift; from a desk down its aisle; from the coffee corner up; and along the corridor above the coffee
+  // corner. The lift is at the top of that aisle.
+  const HX = 177 + RX, HY = 91;
+  const ezExit = P => P.x >= RX + 140 ? [{ x: AX0, y: P.y }, { x: AX0, y: YC }] : [{ x: P.x, y: YC }];
+  const ezRoute = (A, B) => {
+    const ea = ezExit(A), eb = ezExit(B);
+    const pts = ea[0].x === B.x && B.y < YC ? [A, { x: B.x, y: A.y }, B]
+      : eb[0].x === A.x && A.y < YC ? [A, { x: A.x, y: B.y }, B]
+      : [A, ...ea, ...eb.slice().reverse(), B];
+    return pts.filter((p, i) => !i || p.x !== pts[i - 1].x || p.y !== pts[i - 1].y);
+  };
+  const along = (pts, f) => { const seg = []; let L = 0; for (let i = 1; i < pts.length; i++) { const d = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y); seg.push(d); L += d; }
+    let rem = Math.max(0, Math.min(1, f)) * L; for (let i = 1; i < pts.length; i++) { if (rem <= seg[i - 1] || i === pts.length - 1) { const k = seg[i - 1] ? Math.min(1, rem / seg[i - 1]) : 0; return { x: pts[i - 1].x + (pts[i].x - pts[i - 1].x) * k, y: pts[i - 1].y + (pts[i].y - pts[i - 1].y) * k }; } rem -= seg[i - 1]; }
+    return pts[0]; };
+  const ezPos = S => {
+    if (S.walk && T < S.walk.t1) return along(S.walk.pts, (T - S.walk.t0) / (S.walk.t1 - S.walk.t0));
+    if (S.loop && T >= S.b) { const D = S.loop.D, ph = ((((T - S.b) % D) + D) % D) / D, q = ph < .4 ? ph / .4 * .5 : ph < .5 ? .5 : ph < .9 ? .5 + (ph - .5) / .4 * .5 : 1; return along(S.loop.all, q); }
+    return S.start; };
+  // Ezra walks every one who comes out of the lift to its desk, and every one who leaves from its desk to the lift (the owner, 22/11:
+  // "עזרא מלווה את העובד למעלית ומהמעלית. בלי קופסא. רק מלווה"): a plan of walks and stops (pxEsc), one after the other, each
+  // starting where he will be when the plan so far ends. LW: where he waits beside the lift, right of its doors.
+  const LW = { x: LIFTX + 9, y: LIFTO + 6 }, plen = pts => { let s = 0; for (let i = 1; i < pts.length; i++) s += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y); return s; };
+  const escAt = () => pxEsc && pxEsc.t1 > T ? { p: pxEsc.end, t: pxEsc.t1 } : { p: pxEz ? ezPos(pxEz) : { x: HX, y: HY }, t: +(T + .05).toFixed(2) };
+  const escAdd = (pts, t0, t1) => { const h = escAt();
+    if (!pxEsc || pxEsc.t1 <= T) pxEsc = { legs: [], stops: [], end: h.p, t1: h.t };
+    if (t0 > pxEsc.t1 + .01) pxEsc.stops.push({ x: pxEsc.end.x, y: pxEsc.end.y, t0: pxEsc.t1, t1: t0 });
+    if (pts.length > 1) pxEsc.legs.push({ pts, t0, t1 });
+    pxEsc.end = pts[pts.length - 1]; pxEsc.t1 = t1; pxEsc.handed = false; };
+  // He walks from where he will be to B along his lanes, not before tMin; returns when he is there.
+  const escGo = (B, tMin) => { const h = escAt(), r = ezRoute(h.p, B), t0 = +Math.max(h.t, tMin || 0).toFixed(2), len = plen(r);
+    const t1 = +(t0 + (len > .5 ? Math.min(14, Math.max(1.5, len / 30)) : 0)).toFixed(2);
+    escAdd(len > .5 ? r : [B], t0, t1); return t1; };
+  // He walks along pts (beside the worker), from t0, at the speed v (pixels a second); returns when he is there.
+  const escWith = (pts, t0, v) => { const t1 = +(t0 + plen(pts) / Math.max(5, v)).toFixed(2); escAdd(pts, +t0.toFixed(2), t1); return t1; };
+  // He stays where he is until t.
+  const escWait = t => { if (pxEsc && t > pxEsc.t1) escAdd([pxEsc.end], +t.toFixed(2), +t.toFixed(2)); };
   // The coffee corner: three café tables with two chairs each. Everyone has the same day but starts it at another time
   // (CAFE_OFF, seconds), so each one gets up alone: two minutes sitting, to the counter (a coffee and something to eat), a minute
   // standing in front of the table, two more minutes sitting, and a quick refill. The two at a table stand together for half a
@@ -2138,12 +2267,16 @@ function officeScene(workers, ezra, forGuy, sList, reqs, later, usage, events, a
   // Bina's spot: in the gap between the first two tables, where two who stand would be; her two stand at her sides. They are taken in
   // turn from the others in the corner (in the order of their café spots): at step s (two minutes each) the ones at s and s + 1, so
   // one of them changes at each step. Each keeps its side while it stays (the side of the step it came in).
-  const BX = STX[0] + 6, BSTEP = 120000, bMates = new Map();
-  if (staR) { const order = cafe.map(o => o.r.p.id).sort((a, b) => pxSpotOf[a] - pxSpotOf[b]), n = order.length, s = Math.floor(Date.now() / BSTEP);
-    if (n <= 2) order.forEach((id, i) => bMates.set(id, i));
-    else { bMates.set(order[s % n], s % 2); bMates.set(order[(s + 1) % n], (s + 1) % 2); } }
-  const mateLoop = (id, side) => { const x = BX + (side ? 15 : -15), y = STY + (side ? 0 : 1);
-    return { sx: x, y, tx: x + (side ? -2 : 2), ty: y + 1, dur: side ? 13 : 11, role: 'chat', key: 'b' + side, b: pxSince[id] != null ? pxSince[id] : -(side * 4 + 3) }; };
+  // Since 22/11 her company changes (the owner: "הם לא קבועים ומדי פעם מתחלפים. יכול להיות גם רק אחד לידה ועד שלושה. הם ישארו
+  // לידה 3 דקות ואז ילכו. אבל היא אף פעם לא לבד"): each minute may bring one of the others in the corner (in turn, by their café
+  // spots), by a fixed 9-minute pattern of comings, and each one stays three minutes; so one to three stand with her, never none.
+  // Sides: left, right, and behind on her right. With three or fewer others each keeps its own side; with more, the side of its coming.
+  const BX = STX[0] + 6, bMates = new Map(), BJOIN = [1, 1, 1, 0, 0, 1, 0, 1, 0];
+  if (staR) { const order = cafe.map(o => o.r.p.id).sort((a, b) => pxSpotOf[a] - pxSpotOf[b]), n = order.length, s = Math.floor(Date.now() / 60000);
+    const kOf = t => Math.floor(t / 9) * 5 + BJOIN.slice(0, t % 9).reduce((a, v) => a + v, 0);
+    for (let t = s - 2; t <= s && n; t++) if (BJOIN[t % 9]) { const k = kOf(t), id = order[k % n]; if (!bMates.has(id)) bMates.set(id, n <= 3 ? order.indexOf(id) : k % 3); } }
+  const mateLoop = (id, side) => { const x = BX + [-15, 15, 8][side], y = STY + [1, 0, -6][side];
+    return { sx: x, y, tx: x + [2, -2, -1][side], ty: y + 1, dur: [11, 13, 12][side], role: 'chat', key: 'b' + side, b: pxSince[id] != null ? pxSince[id] : -(side * 4 + 3) }; };
   const loopOf = (id, j) => {
     if (id === staId) return { sx: BX, y: STY, tx: BX + 1, ty: STY + 1, dur: 12, role: 'chat', key: 'bina', b: pxSince[id] != null ? pxSince[id] : -1 };
     if (bMates.has(id)) return mateLoop(id, bMates.get(id));
@@ -2164,7 +2297,9 @@ function officeScene(workers, ezra, forGuy, sList, reqs, later, usage, events, a
     return { pts, dur: CAFE_D, b: -CAFE_OFF(j), sx: sit[0], y: sit[1], role: 'cafe', key: 'c' + j, t: { tC, tL, tQ, up2, tC2, tB } }; };
   for (const r of workers) {
     const id = r.p.id, st = pxState(r), d = desk[id], was = pxWhere[id];
-    const now = st === 'work' || st === 'workwait' ? 'desk' : inB.has(id) && pxSeatOf[id] < MAXB ? 'bench' : inL.has(id) && (id === staId || bMates.has(id) || pxSpotOf[id] < CAFE + CAFE_ST) ? 'lounge' : 'other';
+    // Bina doing her nails sits in her chair at the desk: for the walks that is the desk.
+    const now = id === nailsId ? 'nails' : st === 'work' || st === 'workwait' ? 'desk' : inB.has(id) && pxSeatOf[id] < MAXB ? 'bench' : inL.has(id) && (id === staId || bMates.has(id) || pxSpotOf[id] < CAFE + CAFE_ST) ? 'lounge' : 'other';
+    const wasAt = was && (was.at === 'nails' ? 'desk' : was.at), nowAt = now === 'nails' ? 'desk' : now, toDesk = now === 'nails' ? 'nails' : 'in';
     // Leaving a standing spot starts where the person is right now on its little loop.
     // B (the seat) stays in the right side's coordinates for drawing; Bw and P are in the office's, for the walks.
     const B = now === 'bench' ? seatAt(pxSeatOf[id]) : null, P = was && was.pos && abs(was.at === 'bench' && was.loop ? pxLoopPos(was.loop, T) : was.pos), Bw = abs(B);
@@ -2173,21 +2308,33 @@ function officeScene(workers, ezra, forGuy, sList, reqs, later, usage, events, a
     const toLounge = (from, T0 = T) => { delete pxSince[id]; const L = loopOf(id, pxSpotOf[id]); let p = pxLoopPos(L, T0 + 4);
       for (let k = 0; k < 2; k++) p = pxLoopPos(L, pxWalk('out', from(p), T0).t1);
       pxMoves[id] = pxWalk('out', from(p), T0); pxSince[id] = pxMoves[id].t1; };
-    // A new worker comes out of the lift, to its bell, and walks to where it belongs now: its desk, the coffee corner or the bench.
     if (pxArrive.has(id) && !was) {
       pxArrive.delete(id);
-      const T0 = T + 1 + pxLiftQ++ * 3.5, from = [[LIFTX, LIFTY], [LIFTX, LIFTO], [AX0, LIFTO]];
-      if (now === 'lounge') toLounge(p => from.concat([[AX0, K - 4], [p.x, K - 4], [p.x, p.y]]), T0);
-      else if (now === 'bench') pxMoves[id] = pxWalk('bench', from.concat([[AX0, YC], [HUBX, YC], [HUBX, Bw.y], [Bw.x, Bw.y]]), T0);
-      else pxMoves[id] = pxWalk('in', from.concat([[AX0, K - 4], [d.ax, K - 4], [d.ax, d.y], [d.x, d.y]]), T0);
-      pxMoves[id].lift = 'in';
-      pxLater(pxDing, pxMoves[id].t0 - .6);
-    } else if (was && was.at === 'desk' && now === 'lounge') toLounge(p => [[d.x, d.y], [d.ax, d.y], [d.ax, K - 4], [p.x, K - 4], [p.x, p.y]]);
-    else if (was && was.at === 'lounge' && now === 'desk' && was.loop) {
+      // A new worker (the owner, 22/11: "כשעובד מגיע הוא יוצא מהמעלית ומביא איתו קרטון מניח על הרצפה והוא נפתח לשולחן שלו"): Ezra
+      // goes to the lift and waits beside it; the worker comes out of it, to its bell, carrying a box, and walks with Ezra to where
+      // its desk will be. It puts the box on the floor, the box opens into its desk, and only then does it go where it belongs now:
+      // its chair, the coffee corner or the bench. Ezra walks back to what he does.
+      const sd = standAt(d), hasEz = !!ezra, tE = hasEz ? escGo(LW) : 0, T0 = +Math.max(T + 1 + pxLiftQ++ * 3.5, tE + .3).toFixed(2);
+      const carry = pxWalk('box', [[LIFTX, LIFTY], [LIFTX, LIFTO], [AX0, LIFTO], [AX0, K - 4], [d.ax, K - 4], [d.ax, d.y]].concat(sd.left ? [[sd.x, sd.y]] : []), T0);
+      const tDrop = +(carry.t1 + .3).toFixed(2), tOpen = +(tDrop + .5).toFixed(2), tDesk = +(tOpen + 1.5).toFixed(2);
+      pxBox[id] = { carry, sd, tDrop, tOpen, tDesk, door: +(carry.t0 - .6).toFixed(2) };
+      if (hasEz) {
+        // He walks right behind, on the same lanes, and stops a step behind the worker (below it in its aisle; at the fixed desk, on its left).
+        const v = carry.d ? plen(carry.pts.map(p => ({ x: p[0], y: p[1] }))) / carry.d : 30;
+        const E = [LW, { x: AX0, y: LW.y }, { x: AX0, y: K - 4 }].concat(sd.left ? [{ x: sd.x - 13, y: K - 4 }, { x: sd.x - 13, y: sd.y + 4 }] : [{ x: d.ax, y: K - 4 }, { x: d.ax, y: d.y + 18 }]);
+        escWith(E, carry.t0 + 1, v); escWait(tDesk + .3); }
+      const fromSt = rest => [[sd.x, sd.y]].concat(sd.left ? [[d.ax, d.y]] : [], rest);
+      if (now === 'lounge') toLounge(p => fromSt([[d.ax, K - 4], [p.x, K - 4], [p.x, p.y]]), tDesk);
+      else if (now === 'bench') pxMoves[id] = pxWalk('bench', fromSt(deskToBench(d, Bw).slice(2)), tDesk);
+      else pxMoves[id] = pxWalk(toDesk, [[sd.x, sd.y], [d.x, d.y]], tDesk, 1.2);
+      pxLater(pxDing, pxBox[id].door);
+      pxLater(() => pxSfx('whoosh'), tOpen + .5);
+    } else if (was && wasAt === 'desk' && now === 'lounge') toLounge(p => [[d.x, d.y], [d.ax, d.y], [d.ax, K - 4], [p.x, K - 4], [p.x, p.y]]);
+    else if (was && was.at === 'lounge' && nowAt === 'desk' && was.loop) {
       const p0 = pxLoopPos(was.loop, T);
-      pxMoves[id] = pxWalk('in', [[p0.x, p0.y], [p0.x, K - 4], [d.ax, K - 4], [d.ax, d.y], [d.x, d.y]], T);
-    } else if (was && was.at === 'desk' && now === 'bench') pxMoves[id] = pxWalk('bench', deskToBench(d, Bw), T);
-    else if (was && was.at === 'bench' && now === 'desk' && P) pxMoves[id] = pxWalk('in', deskToBench(d, P).reverse(), T);
+      pxMoves[id] = pxWalk(toDesk, [[p0.x, p0.y], [p0.x, K - 4], [d.ax, K - 4], [d.ax, d.y], [d.x, d.y]], T);
+    } else if (was && wasAt === 'desk' && now === 'bench') pxMoves[id] = pxWalk('bench', deskToBench(d, Bw), T);
+    else if (was && was.at === 'bench' && nowAt === 'desk' && P) pxMoves[id] = pxWalk(toDesk, deskToBench(d, P).reverse(), T);
     else if (was && was.at === 'lounge' && now === 'bench' && was.loop) {
       const p0 = pxLoopPos(was.loop, T);
       pxMoves[id] = pxWalk('bench', [[p0.x, p0.y], [p0.x, K - 4], [HUBX, K - 4], [HUBX, Bw.y], [Bw.x, Bw.y]], T);
@@ -2206,62 +2353,104 @@ function officeScene(workers, ezra, forGuy, sList, reqs, later, usage, events, a
   // A walk that starts now sounds when it lands: at the desk, typing; in the coffee corner, cups; on the bench, a chair.
   for (const id of Object.keys(pxMoves)) { const m = pxMoves[id]; if (!m || m.sfx || m.lift) continue; m.sfx = true;
     if (m.t0 >= T) pxLater(() => pxSfx(m.kind === 'in' ? 'type' : m.kind === 'out' ? 'cup' : 'sit'), m.t1); }
-  // One who went to the archive: a sad trombone, and it walks from where it was to the lift, which takes it away.
-  // Without a place from before (the page was opened since), it comes up the aisle under the lift.
   // Everyone who is not sitting at a desk (walkers, the coffee corner, the waiting chairs, Ezra) and the café tables go into ppl as
   // { y: the feet, s: the drawing }; they are painted sorted by y, back to front, inside the desks' clip.
   let deskHoles = ''; const ppl = [];
+  const pocket = (p, x, y) => `${p.figure === 'bina' ? '' : `<text x="${x + 10}" y="${y + 12.3}" text-anchor="middle" font-size="2.9">${esc(p.emoji || '')}</text>`}`;
   for (const id of Object.keys(pxLeaving)) {
     const g = pxLeaving[id];
     if (g.todo) {
       g.todo = false;
-      const w = pxWhere[id], L0 = pxLast[id], T0 = T + .6 + pxLiftQ++ * 3.5;
-      let start;
-      if (w && w.at === 'lounge' && w.loop) { const p0 = pxLoopPos(w.loop, T); start = [[p0.x, p0.y], [p0.x, K - 4], [AX0, K - 4]]; }
-      else if (w && w.at === 'bench' && w.pos) { const P0 = abs(w.loop ? pxLoopPos(w.loop, T) : w.pos); start = [[P0.x, P0.y], [HUBX, P0.y], [HUBX, YC], [AX0, YC]]; }
-      else if (L0) start = [[L0.x, L0.y], [L0.ax, L0.y], [L0.ax, K - 4], [AX0, K - 4]];
-      else start = [[AX0, K - 4]];
-      g.m = pxWalk('leave', start.concat([[AX0, LIFTO], [LIFTX, LIFTO], [LIFTX, LIFTY]]), T0); g.m.lift = 'out';
+      // Leaving for the archive (the owner, 22/11: "כשעובד נשלח לארכיון הוא נעמד השולחן מתקפל חזרה לקרטון. הוא אוסף אותו והולך
+      // למעלית", and Ezra walks with it): Ezra comes to the worker's desk; the worker gets up from it, or walks back to it, and stands
+      // beside it; a sad trombone, and the desk folds back into its box; the worker picks the box up and walks to the lift with Ezra,
+      // and the lift takes it away. Ezra waits until the doors close, and walks back to what he does.
+      const gd = deskAt(g.row), dk = { x: gd.dx + 6, y: gd.dy - 16, ax: gd.ax }, sd = standAt(dk), w = pxWhere[id], hasEz = !!ezra;
+      const EZ = sd.left ? { x: sd.x - 13, y: sd.y + 4 } : { x: dk.ax, y: dk.y + 18 }, tE = hasEz ? escGo(EZ, T + .05) : T + .6;
+      const fromSt = rest => [[sd.x, sd.y]].concat(sd.left ? [[dk.ax, dk.y]] : [], rest);
+      let w1 = null, sat = '';
+      if (w && w.at === 'lounge' && w.loop) { const p0 = pxLoopPos(w.loop, T); w1 = pxWalk('leave', fromSt([[dk.ax, K - 4], [p0.x, K - 4], [p0.x, p0.y]]).reverse(), T); }
+      else if (w && w.at === 'bench' && w.pos) { const P0 = abs(w.loop ? pxLoopPos(w.loop, T) : w.pos); w1 = pxWalk('leave', fromSt(deskToBench(dk, P0).slice(2)).reverse(), T); }
+      else if (w && (w.at === 'desk' || w.at === 'nails')) { sat = w.at; w1 = pxWalk('leave', [[dk.x, dk.y], [sd.x, sd.y]], Math.max(T, tE - 1.5), 1.2); }
+      const tFold = +(Math.max(tE, w1 ? w1.t1 : T + .6) + .5).toFixed(2), tShut = +(tFold + 1).toFixed(2), tPick = +(tShut + .9).toFixed(2);
+      const carry = pxWalk('leave', fromSt([[dk.ax, K - 4], [AX0, K - 4], [AX0, LIFTO], [LIFTX, LIFTO], [LIFTX, LIFTY]]), tPick - .3);
+      Object.assign(g, { gd, dk, sd, w1, sat, tFold, tShut, tPick, m: carry, door: +(carry.t1 - 1.2).toFixed(2) });
+      if (hasEz) { const v = carry.d ? plen(carry.pts.map(p => ({ x: p[0], y: p[1] }))) / carry.d : 30;
+        const E = [EZ].concat(sd.left ? [{ x: EZ.x, y: K - 4 }] : [{ x: dk.ax, y: K - 4 }], [{ x: AX0, y: K - 4 }, { x: AX0, y: LW.y }, LW]);
+        // Here he leads the way, a step ahead, and waits beside the lift until its doors close.
+        escWith(E, tPick, v); escWait(carry.t1 + 1); }
       for (const o of [pxWhere, pxSpotOf, pxSeatOf, pxMoves, pxSince, pxLast]) delete o[id];
-      pxLater(pxSadTrombone, g.m.t0);
-      pxLater(pxDing, g.m.t1 - 1.2);
+      pxLater(pxSadTrombone, tFold);
+      pxLater(pxDing, g.door);
     }
     // A walk of an office whose clock started again (a new page) is dropped.
-    if (!g.m || g.m.t1 < T - 3 || g.m.t0 > T + 60) { delete pxLeaving[id]; continue; }
-    ppl.push(...pxWalkerLegs(g.p, g.m));
+    if (!g.m || g.m.t1 < T - 3 || g.m.t0 > T + 90) { delete pxLeaving[id]; continue; }
+    if (g.gd) { const { gd, dk, sd, w1 } = g, ext = g.row === fixedR ? 0 : PX_DESK_EXT;
+      deskHoles += `M${gd.dx - ext},${gd.dy}h${30 + ext}v12h-${30 + ext}z M${gd.dx + 19},${gd.dy - 10}h11v9h-11z `;
+      // The desk (with the worker still at it) until it folds; then the box on the floor until the worker picks it up.
+      back += pxShowUntil(g.tFold, pxChair(gd.dx + 9, gd.dy - 10) + (g.sat && w1 ? pxShowUntil(w1.t0, pxChar(dk.x, dk.y, g.p, true, g.sat === 'nails' ? 'nails' : undefined) + pocket(g.p, dk.x, dk.y)) : '') +
+          pxDesk(gd.dx, gd.dy, g.p, false, ext) + (g.sat === 'nails' && w1 ? pxShowUntil(w1.t0, pxNailsHands(gd.dx, gd.dy)) : '')) +
+        pxDeskMorph(gd.dx, gd.dy, g.p, g.tFold, 1, false, ext) +
+        pxShowWin(g.tShut, +(g.tShut + .4).toFixed(2), pxCarton(gd.dx + 9, gd.dy + 1.5, g.p, true)) + pxShowWin(+(g.tShut + .4).toFixed(2), g.tPick, pxCarton(gd.dx + 9, gd.dy + 1.5, g.p, false));
+      ppl.push({ y: sd.y + 22, s: pxShowWin(w1 ? w1.t1 : T, g.tPick, pxChar(sd.x, sd.y, g.p, false) + pocket(g.p, sd.x, sd.y)) });
+      if (w1) ppl.push(...pxWalkerLegs(g.p, w1)); }
+    ppl.push(...pxWalkerLegs(g.p, g.m, true));
   }
   workers.forEach(r => {
-    const { dx, dy } = deskAt(r);
+    const { dx, dy } = deskAt(r), id = r.p.id, fixed = r === fixedR, ext = fixed ? 0 : PX_DESK_EXT;
     // spot: where Ezra stands when he comes to this worker: in the aisle beside the desk, above the name tags.
-    pos[r.p.id] = { x: dx + 15, y: dy - 8 }; spot[r.p.id] = { x: dx + 31, y: dy - 10 }; names[r.p.id] = r.p.name;
-    const st = pxState(r), atDesk = st === 'work' || st === 'workwait', l = pxLook(r.p);
-    const m = pxMoves[r.p.id], back2 = m && m.kind === 'in' ? m.t1 : null;
+    pos[id] = { x: dx + 15, y: dy - 8 }; spot[id] = { x: dx + 31, y: dy - 10 }; names[id] = r.p.name;
+    const st = pxState(r), atDesk = st === 'work' || st === 'workwait', nails = id === nailsId, l = pxLook(r.p);
+    const m = pxMoves[id], back2 = m && m.kind === 'in' ? m.t1 : null, backN = m && m.kind === 'nails' ? m.t1 : null;
+    // A worker that has just come: its desk shows only when its box has opened into it; before that, the box (pxBox).
+    const bx = pxBox[id] && pxBox[id].tDesk > T - 1 ? pxBox[id] : null;
+    let b = '', f = '';
     // A walker (also one coming from the lift) is painted by depth with the others; the desks' holes in the clip hide it behind a desk.
-    back += pxChair(dx + 9, dy - 10); if (m) ppl.push(...pxWalkerLegs(r.p, m));
-    deskHoles += `M${dx},${dy}h30v12h-30z M${dx + 19},${dy - 10}h11v9h-11z `;
-    // At the desk too, the session's emoji is on the shirt pocket: a worker always wears its badge.
-    if (atDesk) back += pxShowFrom(back2, pxChar(dx + 6, dy - 16, r.p, true) + `<text x="${dx + 16}" y="${dy - 3.7}" text-anchor="middle" font-size="2.9">${esc(r.p.emoji || '')}</text>`);
-    back += pxDesk(dx, dy, r.p, atDesk);
-    // Only the task it works on now lies open on the desk; its other tasks stand in the library, and owner items are in the tray.
-    const tk = pxTasks(r);
-    let openB = '';
-    // More than one task on the desk (the owner, 16/11: "זה צריך להראות (לא מספר) - גרפית"): the first lies open, the others lie
-    // closed in a pile on the desk's right side, one binder on the other for every task, with no limit (the owner, 16/11: "למה
-    // לא ערימת קלסרים בלי הגבלה אחד על השני?"). Each lies a little off the one under it, like a real pile.
-    const pileY = i => +(dy + 4.2 - (i - 1) * 2).toFixed(1), pileX = i => +(dx + 21 + ((i * 7) % 3 - 1) * .6).toFixed(1);
-    if (atDesk) tk.desk.forEach((tx, i) => { const s = put(pxTaskKey(r.p, tx), 'desk', i ? pileX(i) : dx + .4, i ? pileY(i) : dy + .5, r.p, i ? '' : pxOpenBinder(dx + .4, dy + .5, r.p), { land: back2 }); if (!i) openB = s; });
-    if (atDesk && tk.desk.length) back += pxShowFrom(back2, `<g class="who"><title>${esc((tk.desk.length === 1 ? 'על השולחן: ' : tk.desk.length + ' משימות על השולחן: ') + tk.desk.join(' · '))}</title>${openB}` +
-      Array.from({ length: tk.desk.length - 1 }, (_, i) => { const y = pileY(i + 1), x = pileX(i + 1);
-        return `<rect x="${x}" y="${y}" width="8.4" height="1.8" fill="${esc(pxTie(r.p))}"/><rect x="${x}" y="${y}" width="8.4" height=".4" fill="#FFFFFF" fill-opacity=".35"/>` +
-          `<rect x="${+(x + 7.6).toFixed(1)}" y="${+(y + .3).toFixed(1)}" width=".8" height="1.3" fill="#FFFFFF" fill-opacity=".85"/><rect x="${+(x + 2.6).toFixed(1)}" y="${+(y + .45).toFixed(1)}" width="2.4" height=".9" fill="#FFFFFF"/><rect x="${x}" y="${+(y + 1.6).toFixed(1)}" width="8.4" height=".2" fill="#000000" fill-opacity=".3"/>`; }).join('') + `</g>`);
-    if (atDesk) back += pxShowFrom(back2, pxKeys(dx + 7, dy - 1, l.skin));
-    if (st !== 'none') back += pxShowFrom(back2, pxEffort(dx, dy, r.s));
-    if (r.s && r.s.noReboot && Date.parse(r.s.noReboot.until) > Date.now()) back += `<rect x="${dx + 14}" y="${dy + 7}" width="6" height="4" fill="#B91C1C"/><rect x="${dx + 15}" y="${dy + 8}" width="4" height="1" fill="#FFFFFF"/>`;
-    if (st === 'none') back += pxShowFrom(back2, `<text x="${dx + 13}" y="${dy - 1}" font-family="Heebo" font-size="6" font-weight="800" fill="#8C8C97" text-anchor="middle">?</text>`);
-    front += pxTag(dx + 15, dy + 19, r, r.bad ? 'קובץ פגום' : (r.p.figure === 'bina' ? PX_LABEL_F : PX_LABEL)[st], PX_COLOR[st]);
-    // A click anywhere on the desk (the worker at it, the binders, the screen or the name) opens the worker's window.
-    front += `<g class="who" data-act="open:w:${esc(r.p.id)}"><title>${esc(pxTip(r) + '\nלחיצה: החלון של ' + r.p.name)}</title><rect x="${dx}" y="${dy - 18}" width="30" height="45" fill="transparent"/></g>`;
+    b += pxChair(dx + 9, dy - 10); if (m) ppl.push(...pxWalkerLegs(r.p, m));
+    deskHoles += `M${dx - ext},${dy}h${30 + ext}v12h-${30 + ext}z M${dx + 19},${dy - 10}h11v9h-11z `;
+    // At the desk too, the session's emoji is on the shirt pocket: a worker always wears its badge, except Bina (the owner, 22/11: "בינה לא צריכה אייקון על השמלה"). Bina doing her nails sits here too.
+    if (atDesk || nails) b += pxShowFrom(nails ? backN : back2, pxChar(dx + 6, dy - 16, r.p, true, nails ? 'nails' : undefined) + `${r.p.figure === 'bina' ? '' : `<text x="${dx + 16}" y="${dy - 3.7}" text-anchor="middle" font-size="2.9">${esc(r.p.emoji || '')}</text>`}`);
+    b += pxDesk(dx, dy, r.p, atDesk, ext);
+    // Every open task is on the desk until it is done (pxPileAt): the one worked on now lies open in front of the worker, the others
+    // in piles, the oldest at the bottom, so a new one lands on top and the others stay where they are. Things that wait for the
+    // owner are in his tray; finished ones go to the library.
+    const tk = pxTasks(r), cur = atDesk ? tk.desk.slice(0, 1) : [], pile = (atDesk ? tk.desk.slice(1) : tk.desk).concat(tk.shelf.slice().reverse());
+    if (cur.length) b += pxShowFrom(back2, put(pxTaskKey(r.p, cur[0]), 'desk', dx + .4, dy + .5, r.p, pxDrop(dx + .4, dx + 9, dy + 5.5, 5) + pxOpenBinder(dx + .4, dy + .5, r.p), { land: back2 }));
+    const piles = [];
+    pile.forEach((tx, i) => { const key = pxTaskKey(r.p, tx), P = pxPileAt(dx, dy, i, key, fixed);
+      b += put(key, 'desk', P.x, P.y, r.p, pxLying(P.x, P.y, r.p, P.rot), { land: bx ? +(bx.tDesk + 1).toFixed(2) : null });
+      const q = piles[P.pile] || (piles[P.pile] = { x0: P.x, x1: P.x + 8.4, top: P.y });
+      q.x0 = Math.min(q.x0, P.x); q.x1 = Math.max(q.x1, P.x + 8.4); q.top = Math.min(q.top, P.y); });
+    if (atDesk) b += pxShowFrom(back2, pxKeys(dx + 7, dy - 1, l.skin));
+    if (st !== 'none') b += pxShowFrom(back2, pxEffort(dx, dy, r.s));
+    if (r.s && r.s.noReboot && Date.parse(r.s.noReboot.until) > Date.now()) b += `<rect x="${dx + 14}" y="${dy + 7}" width="6" height="4" fill="#B91C1C"/><rect x="${dx + 15}" y="${dy + 8}" width="4" height="1" fill="#FFFFFF"/>`;
+    if (st === 'none') b += pxShowFrom(back2, `<text x="${dx + 13}" y="${dy - 1}" font-family="Heebo" font-size="6" font-weight="800" fill="#8C8C97" text-anchor="middle">?</text>`);
+    if (nails) b += pxShowFrom(backN, pxNailsHands(dx, dy));
+    const lbl = r.bad ? 'קובץ פגום' : nails ? (st === 'done' ? 'סיימה, עושה ציפורניים' : 'ממתינה, עושה ציפורניים') : (r.p.figure === 'bina' ? PX_LABEL_F : PX_LABEL)[st];
+    f += pxTag(dx + 15, dy + 19, r, lbl, PX_COLOR[st]);
+    // A click anywhere on the desk (the worker at it, the screen or the name) opens the worker's window; on a pile, the tasks on the
+    // desk; on the folder, the documents.
+    f += `<g class="who" data-act="open:w:${esc(id)}"><title>${esc(pxTip(r) + '\nלחיצה: החלון של ' + r.p.name)}</title><rect x="${dx - ext}" y="${dy - 18}" width="${30 + ext}" height="45" fill="transparent"/></g>`;
+    const all = cur.concat(pile.slice().reverse());
+    if (all.length) f += `<g class="who" data-act="open:lib:${esc(id)}"><title>${esc((all.length === 1 ? 'משימה אחת על השולחן' : all.length + ' משימות על השולחן') + ':\n' + all.slice(0, 8).map(t => '· ' + t.slice(0, 80)).join('\n') + (all.length > 8 ? '\n…' : '') + '\nלחיצה: המשימות של ' + r.p.name)}</title>` +
+      (cur.length ? `<rect x="${dx}" y="${dy}" width="9.4" height="6" fill="transparent"/>` : '') +
+      piles.filter(Boolean).map(q => `<rect x="${+(q.x0 - .5).toFixed(2)}" y="${+(q.top - 1).toFixed(2)}" width="${+(q.x1 - q.x0 + 1).toFixed(2)}" height="${+(dy + 7 - q.top).toFixed(2)}" fill="transparent"/>`).join('') + `</g>`;
+    const docs = pxDeskDocs(r);
+    if (docs.length) f += `<g class="who" data-act="open:docs:${esc(id)}"><title>${esc((docs.length === 1 ? 'מסמך על השולחן' : docs.length + ' מסמכים על השולחן') + ':\n' + docs.slice(0, 8).map(t => '· ' + t.name).join('\n') + '\nלחיצה: לפתוח')}</title>${pxDrop(dx - ext + .5, dx - ext + 5.5, dy + 1, 7) + pxDocsFolder(dx - ext + .5, dy - 7, docs.length)}</g>`;
+    back += bx ? pxShowFrom(bx.tDesk, b) : b;
+    front += bx ? pxShowFrom(bx.tDesk, f) : f;
+    if (bx) {
+      // The box: carried from the lift, put down where the desk will stand, opened, and the desk grows out of it.
+      const c = bx.carry, sd = bx.sd, tGrow = +(bx.tOpen + .5).toFixed(2);
+      ppl.push(...pxWalkerLegs(r.p, c, true));
+      ppl.push({ y: sd.y + 22, s: pxShowWin(c.t1, +(bx.tDesk + .3).toFixed(2), pxChar(sd.x, sd.y, r.p, false) + pocket(r.p, sd.x, sd.y)) });
+      back += `<g visibility="hidden" style="pointer-events:none"><set attributeName="visibility" to="visible" begin="${c.t1}s"/><set attributeName="visibility" to="hidden" begin="${tGrow}s" fill="freeze"/>` +
+        `<animateMotion path="M${sd.x},${sd.y} L${dx + 8},${dy - 7.5}" begin="${c.t1}s" dur=".3s" fill="freeze"/>` +
+        pxShowUntil(bx.tOpen, pxCarton(1, 9, r.p, false)) + pxShowWin(bx.tOpen, tGrow, pxCarton(1, 9, r.p, true)) + `</g>` +
+        pxDeskMorph(dx, dy, r.p, tGrow, 1, true, ext);
+    }
   });
+  for (const k of Object.keys(pxBox)) if (pxBox[k].tDesk < T - 3) delete pxBox[k];
   // Ezra has no desk and no screen: he stands at the owner's door with a clipboard, and each of his actions is drawn.
   let ez = '';
   // The cabinet (CX) and the lift (LX) stand against the wall, just left of the owner's room, in the right side's
@@ -2274,7 +2463,7 @@ function officeScene(workers, ezra, forGuy, sList, reqs, later, usage, events, a
   const WX = []; { let x = 8; for (const w of WWID) { WX.push(Math.round(x)); x += w + WGAP; } }
   if (ezra) {
     // His spot is left of the door, a little away from the waiting chairs.
-    const HX = 177 + RX, HY = 91, act = ezraAct(ezra), byId = {}, em = id => byId[id] && byId[id].emoji;
+    const act = ezraAct(ezra), byId = {}, em = id => byId[id] && byId[id].emoji;
     workers.forEach(r => { byId[r.p.id] = r.p; });
     pos[ezra.p.id] = { x: HX + 7, y: HY + 10 };
     // Hovering Ezra shows what he does and what he carries, in full; the scene shows only icons.
@@ -2298,43 +2487,38 @@ function officeScene(workers, ezra, forGuy, sList, reqs, later, usage, events, a
     const at = (x, y, extra, bubble, home) => {
       ppl.push({ y: y + 22, s: pxShowFrom(arrive, `<g class="who">${tip}${pxEzra(x, y, ezra.p, false, null, pose)}${home ? ezraName(x + 7, y + 28, ezra) : ''}</g>`) });
       if (extra || bubble) ez += pxShowFrom(arrive, `<g class="who">${tip}${extra || ''}${bubble || ''}</g>`); };
-    // He walks along the office's lanes, as the workers do, and never through a wall (the owner, 15/11: "המסלול של עזרא עובר דרך
-    // הקיר"): from the right side (his door, the bench) along the floor to the aisle right under the lift; from a desk down its
-    // aisle; from the coffee corner up; and along the corridor above the coffee corner. The lift is at the top of that aisle.
-    // He stays a moment and walks back the same way (never a jump back), stepping all the way. The bubble goes with him.
-    const ezExit = P => P.x >= RX + 140 ? [{ x: AX0, y: P.y }, { x: AX0, y: YC }] : [{ x: P.x, y: YC }];
-    const ezRoute = (A, B) => {
-      const ea = ezExit(A), eb = ezExit(B);
-      const pts = ea[0].x === B.x && B.y < YC ? [A, { x: B.x, y: A.y }, B]
-        : eb[0].x === A.x && A.y < YC ? [A, { x: A.x, y: B.y }, B]
-        : [A, ...ea, ...eb.slice().reverse(), B];
-      return pts.filter((p, i) => !i || p.x !== pts[i - 1].x || p.y !== pts[i - 1].y);
-    };
+    // He walks along the office's lanes (ezRoute, above). On a walk there and back he stays a moment and walks back the same way
+    // (never a jump back), stepping all the way. The bubble goes with him.
     // Ezra never jumps (the owner, 16/11: "עזרא הקוף לא אמור לקפוץ ממקום למקום - הוא תמיד הולך"). When his action changes, he
     // walks from where he is right now (also from the middle of a walk) to where the new one starts, along the lanes, and only
     // then does it; a walk there and back starts from there. The first drawing of a page puts him in place.
     const ezStart = act.kind === 'check' && spot[act.arg.split(':')[0]] ? ezSpot(act.arg.split(':')[0])
       : act.kind === 'relay' && act.arg.includes('>') && spot[act.arg.split('>')[0]] && spot[act.arg.split('>')[1]] ? ezSpot(act.arg.split('>')[0])
-      : act.kind === 'conflict' ? { x: CX + RX - 16, y: CY - 2 } : act.kind === 'ask' ? { x: 180 + RX, y: 89 } : act.kind === 'announce' ? { x: 96, y: 70 } : { x: HX, y: HY };
+      : act.kind === 'conflict' ? { x: CX + RX - 16, y: CY - 2 } : act.kind === 'ask' ? { x: 180 + RX, y: 89 } : act.kind === 'announce' ? { x: 96, y: 70 } : act.kind === 'archive' ? LW : { x: HX, y: HY };
     const ezKey = act.kind + '|' + act.arg + '|' + Math.round(ezStart.x) + ',' + Math.round(ezStart.y);
-    const along = (pts, f) => { const seg = []; let L = 0; for (let i = 1; i < pts.length; i++) { const d = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y); seg.push(d); L += d; }
-      let rem = Math.max(0, Math.min(1, f)) * L; for (let i = 1; i < pts.length; i++) { if (rem <= seg[i - 1] || i === pts.length - 1) { const k = seg[i - 1] ? Math.min(1, rem / seg[i - 1]) : 0; return { x: pts[i - 1].x + (pts[i].x - pts[i - 1].x) * k, y: pts[i - 1].y + (pts[i].y - pts[i - 1].y) * k }; } rem -= seg[i - 1]; }
-      return pts[0]; };
-    const ezPos = S => {
-      if (S.walk && T < S.walk.t1) return along(S.walk.pts, (T - S.walk.t0) / (S.walk.t1 - S.walk.t0));
-      if (S.loop && T >= S.b) { const D = S.loop.D, ph = ((((T - S.b) % D) + D) % D) / D, q = ph < .4 ? ph / .4 * .5 : ph < .5 ? .5 : ph < .9 ? .5 + (ph - .5) / .4 * .5 : 1; return along(S.loop.all, q); }
-      return S.start; };
-    if (!pxEz) pxEz = { key: ezKey, start: ezStart, b: -1 };
+    // While he walks someone to or from the lift (pxEsc), his action waits: when that ends, he walks from there to his action's start.
+    const busy = pxEsc && pxEsc.t1 > T;
+    if (pxEsc && !pxEsc.handed && pxEsc.t1 > T - .5) {
+      pxEsc.handed = true;
+      const r = ezRoute(pxEsc.end, ezStart), len = plen(r), t0 = pxEsc.t1, t1 = +(t0 + Math.min(14, Math.max(1.5, len / 30))).toFixed(2);
+      pxEz = { key: ezKey, start: ezStart, b: len > .5 ? t1 : t0, walk: len > .5 ? { pts: r, t0, t1 } : null };
+    } else if (!pxEz) pxEz = { key: ezKey, start: ezStart, b: -1 };
     else if (pxEz.key !== ezKey) {
-      const P = ezPos(pxEz), r = ezRoute({ x: P.x, y: P.y }, ezStart); let len = 0; for (let i = 1; i < r.length; i++) len += Math.hypot(r[i].x - r[i - 1].x, r[i].y - r[i - 1].y);
-      const t0 = +(T + .05).toFixed(2), t1 = +(t0 + Math.min(14, Math.max(1.5, len / 30))).toFixed(2);
-      pxEz = { key: ezKey, start: ezStart, b: len > .5 ? t1 : -1, walk: len > .5 ? { pts: r, t0, t1 } : null };
+      const P = busy ? pxEsc.end : ezPos(pxEz), r = ezRoute({ x: P.x, y: P.y }, ezStart), len = plen(r);
+      const t0 = +(busy ? pxEsc.t1 : T + .05).toFixed(2), t1 = +(t0 + Math.min(14, Math.max(1.5, len / 30))).toFixed(2);
+      pxEz = { key: ezKey, start: ezStart, b: len > .5 ? t1 : busy ? t0 : -1, walk: len > .5 ? { pts: r, t0, t1 } : null };
     }
-    const EW = pxEz.walk && pxEz.walk.t1 > T - .5 ? pxEz.walk : null, arrive = EW ? EW.t1 : null;
-    // His walk there is cut into its legs, each painted by depth, as the workers' walks are.
-    if (EW) for (const k of pxWalkParts(EW.pts.map(p => [+p.x.toFixed(1), +p.y.toFixed(1)]), EW.t0, +(EW.t1 - EW.t0).toFixed(2)))
+    const EW = pxEz.walk && pxEz.walk.t1 > T - .5 ? pxEz.walk : null, arrive = EW ? EW.t1 : busy ? pxEsc.t1 : null;
+    // His walk there is cut into its legs, each painted by depth, as the workers' walks are. No box (the owner, 22/11: "בלי קופסא").
+    const legs = (pts, t0, t1) => { for (const k of pxWalkParts(pts.map(p => [+p.x.toFixed(1), +p.y.toFixed(1)]), t0, +(t1 - t0).toFixed(2)))
       ppl.push({ y: k.y, s: `<g class="who" visibility="hidden">${tip}<set attributeName="visibility" to="visible" begin="${k.t0}s"/><set attributeName="visibility" to="hidden" begin="${k.t1}s" fill="freeze"/>` +
-        `<animateMotion path="${k.path}" dur="${k.d}s" begin="${k.t0}s" fill="freeze"/>${pxEzra(0, 0, ezra.p, act.kind === 'archive', { dur: k.d, begin: k.t0, parts: [[0, 1]] }, 'side')}</g>` });
+        `<animateMotion path="${k.path}" dur="${k.d}s" begin="${k.t0}s" fill="freeze"/>${pxEzra(0, 0, ezra.p, false, { dur: k.d, begin: k.t0, parts: [[0, 1]] }, 'side')}</g>` }); };
+    if (EW) legs(EW.pts, EW.t0, EW.t1);
+    // Walking someone to or from the lift: his walks, and his stops on the way, each seen only in its time.
+    if (pxEsc && pxEsc.t1 > T - .5) {
+      for (const L of pxEsc.legs) if (L.t1 > T - .5) legs(L.pts, L.t0, L.t1);
+      for (const S of pxEsc.stops) if (S.t1 > T - .5) ppl.push({ y: S.y + 22, s: `<g class="who">${tip}${pxShowWin(S.t0, S.t1, pxEzra(S.x, S.y, ezra.p, false, null, 'side'))}</g>` });
+    }
     // A walk there and back: it starts when he arrives at its start (or, on a page's first drawing, as it always did).
     const walk = (A, B, extra, bubble, box) => {
       const r = ezRoute(A, B), all = r.concat(r.slice(0, -1).reverse());
@@ -2387,7 +2571,8 @@ function officeScene(workers, ezra, forGuy, sList, reqs, later, usage, events, a
         `<g style="animation:pxblink .7s infinite"><rect x="115" y="72" width="1" height="2" fill="#FFFFFF"/><rect x="116" y="75" width="2" height="1" fill="#FFFFFF"/><rect x="115" y="78" width="1" height="2" fill="#FFFFFF"/></g>` +
         `<rect x="88" y="58" width="34" height="10" fill="#FFFFFF"/><rect x="104" y="68" width="2" height="2" fill="#FFFFFF"/><text x="105" y="65.5" text-anchor="middle" font-family="Heebo" font-size="5" font-weight="800" fill="#1E1B2E">${esc(t)}</text>`);
     } else if (act.kind === 'archive') {
-      walk({ x: HX, y: HY }, { x: LX + 7 + RX, y: WALL - 21 }, '', act.arg && em(act.arg) ? pxBubble(0, 0, 10, pxBubbleEmoji(7, -5, em(act.arg))) : '', true);
+      // He stands beside the lift, with the emoji of the one he walks there (the walk itself is pxEsc, with the worker).
+      at(LW.x, LW.y, '', act.arg && em(act.arg) ? pxBubble(LW.x, LW.y, 10, pxBubbleEmoji(LW.x + 7, LW.y - 5, em(act.arg))) : '');
     } else if (act.kind === 'board') {
       at(HX, HY, '', '', true);
     } else {
@@ -2427,7 +2612,7 @@ function officeScene(workers, ezra, forGuy, sList, reqs, later, usage, events, a
   reqs.slice(0, 6).forEach(({ from, q }, k) => {
     // Each envelope leaves the mail room on the wall and flies to the desk of the worker it is for.
     const a = { x: WX[4] + 15, y: 30 }, b = pos[q.to];
-    if (a && b && a !== b) fly += pxEnv(a.x, a.y, b.x, b.y, k, 'בקשה מ־' + from.emoji + ' ' + from.name + ': ' + q.what, from.emoji);
+    if (a && b && a !== b) fly += pxEnv(a.x, a.y, b.x, b.y, k, 'בקשה מ־' + from.emoji + ' ' + from.name + ': ' + q.what, from.emoji, pxTie(byIdAll[q.to] || { color: '#38BDF8' }), reqOld(q));
   });
   // The coffee corner: a sofa, the counter and the coffee machine; whoever is not working hangs out here.
   // The coffee corner has the same floor as the rest of the office.
@@ -2447,7 +2632,7 @@ function officeScene(workers, ezra, forGuy, sList, reqs, later, usage, events, a
     const L = loopOf(r.p.id, j), k = j - CAFE, m = pxMoves[r.p.id], mate = occT.has(CAFE + (k ^ 1));
     const g = `<g class="who" data-act="open:w:${esc(r.p.id)}"><title>${esc(pxTip(r) + '\nאין כיסא פנוי: עומד ומדבר')}</title><animateMotion path="M${L.sx},${L.y} L${L.tx},${L.ty} L${L.sx},${L.y}" dur="${L.dur}s" begin="${L.b}s" repeatCount="indefinite" keyPoints="0;0;.5;.5;1;1" keyTimes="${PX_LOOP_KT}" calcMode="linear"/>` +
       pxChar(0, 0, r.p, false, 'pxcu') + pxWalkLegs(0, 0, pxLegC(r.p), L.dur, L.b, PX_LOOP_WALK) +
-      `<text x="10" y="12.3" text-anchor="middle" font-size="2.9">${esc(r.p.emoji || '')}</text>` +
+      `${r.p.figure === 'bina' ? '' : `<text x="10" y="12.3" text-anchor="middle" font-size="2.9">${esc(r.p.emoji || '')}</text>`}` +
       `<rect x="${k % 2 ? 12 : -1}" y="12" width="3" height="3" fill="#FFFFFF" stroke="#C9C2B6" stroke-width=".3"/>` +
       (st === 'done' ? pxCheck(4, -7) : pxWaitMark(3, -8)) + (mate ? pxChatter(k % 2 === 0, k * .9) : '') + `</g>`;
     ppl.push({ y: Math.max(L.y, L.ty) + 22, s: m && m.kind === 'out' ? pxShowFrom(m.t1, g) : g });
@@ -2462,7 +2647,7 @@ function officeScene(workers, ezra, forGuy, sList, reqs, later, usage, events, a
       const g = `<g class="who" data-act="open:w:${esc(id)}"><title>${esc(pxTip(r) + (isB ? '' : '\nבפינת הקפה, מדבר עם בינה'))}</title>` +
         `<animateMotion path="M${L.sx},${L.y} L${L.tx},${L.ty} L${L.sx},${L.y}" dur="${L.dur}s" begin="${L.b}s" repeatCount="indefinite" keyPoints="0;0;.5;.5;1;1" keyTimes="${PX_LOOP_KT}" calcMode="linear"/>` +
         pxChar(0, 0, r.p, false, 'pxcu') + pxWalkLegs(0, 0, pxLegC(r.p), L.dur, L.b, PX_LOOP_WALK) +
-        `<text x="10" y="12.3" text-anchor="middle" font-size="2.9">${esc(r.p.emoji || '')}</text>` +
+        `${r.p.figure === 'bina' ? '' : `<text x="10" y="12.3" text-anchor="middle" font-size="2.9">${esc(r.p.emoji || '')}</text>`}` +
         `<rect x="${toB ? 12 : -1}" y="12" width="3" height="3" fill="#FFFFFF" stroke="#C9C2B6" stroke-width=".3"/>` +
         (st === 'done' ? pxCheck(4, hi - 7) : pxWaitMark(3, hi - 8)) + talk + `</g>`;
       ppl.push({ y: Math.max(L.y, L.ty) + 22, s: m && m.kind === 'out' ? pxShowFrom(m.t1, g) : g });
@@ -2471,9 +2656,10 @@ function officeScene(workers, ezra, forGuy, sList, reqs, later, usage, events, a
   // The café tables and their chairs (behind the people): a light round top on a dark post, wooden chairs with a back.
   // Each table with its two chairs is painted by depth too: in front of the ones who stand, behind the ones who sit.
   for (const tx of CAFE_T) { let tb = '';
-    // A tall back that shows on both sides of the sitter's head, the seat under the thighs, the legs down to the shoes' floor.
-    for (const cx of [tx - 19, tx + 5]) { const cy = SY + 2; tb += `<rect x="${cx + 1}" y="${cy + 2}" width="12" height="15" fill="#6B4429"/><rect x="${cx + 2}" y="${cy + 3}" width="10" height="13" fill="#A9825A"/><rect x="${cx + 2}" y="${cy + 3}" width="10" height="1" fill="#C29A6A"/>` +
-      `<rect x="${cx}" y="${cy + 17}" width="14" height="2" fill="#6B4429"/><rect x="${cx}" y="${cy + 17}" width="14" height="1" fill="#8B5E3C"/><rect x="${cx + 1}" y="${cy + 19}" width="1" height="3" fill="#4A2E1A"/><rect x="${cx + 12}" y="${cy + 19}" width="1" height="3" fill="#4A2E1A"/>`; }
+    // The chairs as they were before 19/11 (the owner, 22/11: "בגרסאות הישנות הם היו יפים יותר", "כן, תחזיר את הכיסאות הישנים"):
+    // a low back with a gap above a thin seat, and thin legs. The seat is under the sitter's thighs and the legs end on the shoes' floor.
+    for (const cx of [tx - 19, tx + 5]) tb += `<rect x="${cx + 2}" y="${SY + 9}" width="10" height="9" fill="#6B4429"/><rect x="${cx + 3}" y="${SY + 10}" width="8" height="7" fill="#A9825A"/>` +
+      `<rect x="${cx + 1}" y="${SY + 19}" width="12" height="2" fill="#6B4429"/><rect x="${cx + 2}" y="${SY + 21}" width="1" height="3" fill="#4A2E1A"/><rect x="${cx + 11}" y="${SY + 21}" width="1" height="3" fill="#4A2E1A"/>`;
     tb += `<rect x="${tx - 1}" y="${SY + 15}" width="2" height="7" fill="#4A5060"/><rect x="${tx - 4}" y="${SY + 22}" width="8" height="2" fill="#2A2F45"/>` +
       `<rect x="${tx - 6}" y="${SY + 12}" width="12" height="2" fill="#F5F1E6"/><rect x="${tx - 7}" y="${SY + 13}" width="14" height="2" fill="#E2DCCB"/><rect x="${tx - 7}" y="${SY + 15}" width="14" height="1" fill="#B9A27E"/>`;
     ppl.push({ y: SY + 20, s: tb });
@@ -2497,7 +2683,7 @@ function officeScene(workers, ezra, forGuy, sList, reqs, later, usage, events, a
     // Seats 0 and 1 (and 2 and 3) stand together for the last half minute of the first one's minute, the first half of the other's.
     if ((j < 4 || j >= 6) && occL.has(j ^ 1)) body += `<g>${when(false, j % 2 ? [0, Math.min(t.tQ, 179), 180] : [0, Math.max(180, t.tQ + 30), 210])}${pxChatter(j % 2 === 0, j % 2 ? 1.2 : 0)}</g>`;
     // The session's emoji printed small on the shirt pocket, so it stays on the person.
-    body += `<text x="10" y="12.3" text-anchor="middle" font-size="2.9">${esc(r.p.emoji || '')}</text>`;
+    body += `${r.p.figure === 'bina' ? '' : `<text x="10" y="12.3" text-anchor="middle" font-size="2.9">${esc(r.p.emoji || '')}</text>`}`;
     const move = `<animateMotion values="${L.pts.map(p => p[1] + ',' + p[2]).join(';')}" keyTimes="${L.pts.map(p => (p[0] / D).toFixed(4)).join(';')}" dur="${D}s" begin="${L.b}s" repeatCount="indefinite" calcMode="linear"/>`;
     const g = `<g class="who" data-act="open:w:${esc(r.p.id)}"><title>${esc(pxTip(r))}</title>${move}${body}</g>`;
     // Someone who is still walking in from the desk shows up here only when the walk ends.
@@ -2512,7 +2698,7 @@ function officeScene(workers, ezra, forGuy, sList, reqs, later, usage, events, a
   const es = ezra && ezra.s, ezNotes = es ? (waitText(es) ? [{ t: waitText(es), ask: true }] : []).concat((es.items || []).filter(i => i && i.text && !i.guy).map(i => ({ t: String(i.text) }))) : [];
   let room = `<rect x="144" y="0" width="96" height="86" fill="url(#pxcarpet)"/>` +
     // The day clock in the room's corner (the whiteboard's place first, the calendar's since 16/11); the library beside it, wide.
-    pxDayClock(146, 4, pxToday(ezra), byIdAll) + pxShelf(186, 4, lib.done, lib.tasks, (key, place, x, y, p, svg, o) => put(key, place, x + RX, y, p, svg, o)) +
+    pxDayClock(146, 4, pxToday(ezra), byIdAll) + pxShelf(186, 4, lib.done, (key, place, x, y, p, svg, o) => put(key, place, x + RX, y, p, svg, o)) +
     // The desk, the chair, the tray and the phone sit low on the left of the room, under the clock (since 16/11, so the library
     // can be wide).
     `<g transform="translate(-40 30)">` +
@@ -2551,15 +2737,16 @@ function officeScene(workers, ezra, forGuy, sList, reqs, later, usage, events, a
   let benchG = `<rect x="201" y="${BY + 19}" width="39" height="1" fill="#9AA3B5"/><rect x="201" y="${BY + 20}" width="39" height="1" fill="#6B7385"/>` +
     [203, 220, 237].map(x => `<rect x="${x - 1}" y="${BY + 21}" width="3" height="1" fill="#4A5060"/>`).join('');
   for (let j = 0; j < SEATS; j++) { const cx = 202 + j * 12;
-    // A tall upholstered back that shows on both sides of the sitter's head, and the seat under the thighs.
-    benchG += `<rect x="${cx + 1}" y="${BY + 3}" width="12" height="14" fill="#1E3A4C"/><rect x="${cx + 2}" y="${BY + 4}" width="10" height="12" fill="#2F6F8F"/><rect x="${cx + 2}" y="${BY + 4}" width="10" height="1" fill="#4B93B5"/>` +
-      `<rect x="${cx + 1}" y="${BY + 17}" width="12" height="2" fill="#1E3A4C"/><rect x="${cx + 2}" y="${BY + 17}" width="10" height="1" fill="#5BA3C0"/>`; }
+    // As before 19/11 (the owner, 22/11: "כן, תחזיר את הכיסאות הישנים"): an upholstered back on a short post, and a padded seat.
+    benchG += `<rect x="${cx + 1}" y="${BY + 4}" width="10" height="11" fill="#1E3A4C"/><rect x="${cx + 2}" y="${BY + 5}" width="8" height="10" fill="#2F6F8F"/><rect x="${cx + 2}" y="${BY + 5}" width="8" height="1" fill="#4B93B5"/>` +
+      `<rect x="${cx + 5}" y="${BY + 15}" width="2" height="1" fill="#6B7385"/>` +
+      `<rect x="${cx}" y="${BY + 16}" width="12" height="3" fill="#1E3A4C"/><rect x="${cx + 1}" y="${BY + 16}" width="10" height="2" fill="#3B82A0"/><rect x="${cx + 1}" y="${BY + 16}" width="10" height="1" fill="#5BA3C0"/>`; }
   const occS = new Set(bench.map(r => pxSeatOf[r.p.id]).filter(j => j >= SEATS && j < MAXB).map(j => j - SEATS));
   for (const r of bench) {
     const j = pxSeatOf[r.p.id]; if (j >= MAXB) continue;
     const s = seatAt(j), m = pxMoves[r.p.id];
     // The emoji on the shirt pocket, as in the coffee corner. The binders stay on the worker's desk.
-    const pocket = `<text x="10" y="12.3" text-anchor="middle" font-size="2.9">${esc(r.p.emoji || '')}</text>`;
+    const pocket = `${r.p.figure === 'bina' ? '' : `<text x="10" y="12.3" text-anchor="middle" font-size="2.9">${esc(r.p.emoji || '')}</text>`}`;
     let g, fy = s.y + 24;
     if (s.sit) g = `<g class="who" data-act="open:w:${esc(r.p.id)}"><title>${esc(pxTip(r))}</title>${pxChar(s.x, s.y, r.p, false, 'pxcu')}` +
       // Sitting: the thighs on the seat (a lit knee line), the lower legs down in front of the seat, the shoes on the floor.
@@ -2602,7 +2789,7 @@ function officeScene(workers, ezra, forGuy, sList, reqs, later, usage, events, a
     .concat(Object.values(pxLeaving).filter(g => g.m).map(g => g.m.t1 - 1.2));
   const door = (attr, vals) => liftT.map(te => `<animate attributeName="${attr}" values="${vals}" keyTimes="0;.2;.8;1" dur="2s" begin="${te.toFixed(2)}s" fill="remove"/>`).join('');
   const DH = WALL - LT - 7;
-  const lift = `<g data-act="archive" class="who" style="cursor:pointer"><title>המעלית · לחיצה: המחסן של הארכיון\nעובד חדש יוצא ממנה בצלצול, ומי שעובר לארכיון נכנס אליה</title><rect x="${LX}" y="${LT}" width="26" height="${WALL - LT + 1}" fill="#6B7385"/>` +
+  const lift = `<g data-act="archive" class="who" style="cursor:pointer"><title>המעלית · לחיצה: המחסן של הארכיון\nעובד חדש יוצא ממנה עם קרטון, ומי שעובר לארכיון נכנס אליה עם הקרטון</title><rect x="${LX}" y="${LT}" width="26" height="${WALL - LT + 1}" fill="#6B7385"/>` +
     `<rect x="${LX + 2}" y="${LT + 8}" width="22" height="${DH}" fill="#2A2F45"/><rect x="${LX + 2}" y="${LT + 8}" width="22" height="2" fill="#FFE9A8" fill-opacity=".5"/>` +
     `<rect x="${LX + 2}" y="${LT + 8}" width="10" height="${DH}" fill="#9AA3B5">${door('width', '10;.5;.5;10')}</rect>` +
     `<rect x="${LX + 14}" y="${LT + 8}" width="10" height="${DH}" fill="#9AA3B5">${door('x', `${LX + 14};${LX + 23.5};${LX + 23.5};${LX + 14}`)}${door('width', '10;.5;.5;10')}</rect>` +
@@ -2625,11 +2812,11 @@ function officeScene(workers, ezra, forGuy, sList, reqs, later, usage, events, a
   const help = `<g class="pxhelp" style="display:none;pointer-events:none"><rect x="0" y="0" width="${W}" height="${H}" fill="#0B0A12" fill-opacity=".5"/>` +
     lab(WX[0] + WW / 2, 44, 'מזג האוויר אצלך') + lab(WX[1] + 10, 53, 'עזרא: ההסבר הזה') + lab(WX[2] + CBW / 2, 44, 'נדחו: פתק לכל דבר') +
     lab(WX[3] + 9, 53, 'השעה והתאריך אצלך') + lab(WX[4] + 15, 48, 'בקשות בין עובדים') + lab(LX + 13 + RX, 53, 'מעלית: הארכיון') +
-    (d0 ? lab(d0.x + 9, d0.y + 30, 'ליד השולחן: עובד · קלסר פתוח = המשימה של עכשיו') : '') +
-    (d0 ? lab(d0.x + 9, d0.y + 37.5, 'כוסות קפה: רמת המאמץ · קאפקייק: Ultracode') : '') +
+    (d0 ? lab(d0.x + 9, d0.y + 30, 'קלסר פתוח: המשימה של עכשיו · ערימה: המשימות הפתוחות') : '') +
+    (d0 ? lab(d0.x + 9, d0.y + 37.5, 'כוסות קפה: רמת המאמץ · אחרי הקנקן, קאפקייק: Ultracode') : '') +
     lab(19, K - 19, 'עדכונים אחרונים') + lab(21, K + 37, 'נשאר מהמכסה: קפה יום, תה שבוע') + lab(124, K + 3, 'פינת הקפה: לא עובדים עכשיו') +
     lab(163 + RX, 36, 'שעון היום: מתי מותר מה') + lab(179 + RX, 57, 'טלפון: משהו חשוב') + lab(162 + RX, 66, 'מגש: מה שמחכה לך') +
-    lab(211 + RX, 74, 'ספרייה: משימות פתוחות ומה שנגמר היום') + lab(184 + RX, 119, 'עזרא: בודק ומעביר') + lab(226 + RX, BY + 37, 'כיסאות: מחכים לך') +
+    lab(211 + RX, 74, 'ספרייה: מה שנגמר היום ואתמול') + lab(184 + RX, 119, 'עזרא: בודק ומעביר') + lab(226 + RX, BY + 37, 'כיסאות: מחכים לך') +
     lab(CX - 17 + RX, CY - 12, 'שעון נוכחות: שעות היום') + lab(CX + 11 + RX, CY - 20, 'קבצים משותפים · אדום = התנגשות') + `</g>`;
   return `<svg id="pxo" viewBox="0 0 ${W} ${H}" style="width:${Math.floor(W * fit.s)}px" shape-rendering="crispEdges" role="img" aria-label="המשרד: ${workers.length} עובדים, ${n} דברים מחכים לך">${PX_DEFS}` +
     `<rect x="0" y="0" width="${W}" height="${H}" fill="url(#pxplanks)"/>${wall}${R(room)}${floor}${back}${R(cab + punch)}${kit}${meter}${R(benchG)}${R(lift)}<clipPath id="pxwalkclip"><path clip-rule="evenodd" d="M0,0H${W}V${H}H0z ${deskHoles}"/></clipPath><g clip-path="url(#pxwalkclip)">${ppl.sort((a, b) => a.y - b.y).map(o => o.s).join('')}</g>${front}${ez}${fly}${flyB}${help}</svg>`;
@@ -2670,7 +2857,7 @@ function warehouseScene(list) {
     const span = 226 / inRow, x = 6 + col * span + span / 2 - 10 * sc + ((h % 7) - 3) * sc, y = 98 + row * rowH + ((h >>> 3) % 4) * .8 + (col % 2 ? 2 : 0);
     s += `<g class="who"><title>${esc([p.emoji + ' ' + p.name, a.note, a.since && 'מאז ' + a.since].filter(Boolean).join('\n'))}</title>` +
       `<g transform="translate(${x.toFixed(1)} ${y.toFixed(1)}) scale(${sc})"><rect x="-3" y="18" width="20" height="4" fill="#000000" fill-opacity=".2"/>${pxChar(0, 0, p, false)}` +
-      `<text x="10" y="12.3" text-anchor="middle" font-size="2.9">${esc(p.emoji)}</text>` +
+      `${p.figure === 'bina' ? '' : `<text x="10" y="12.3" text-anchor="middle" font-size="2.9">${esc(p.emoji)}</text>`}` +
       `<rect x="14" y="6" width="12" height="9" fill="#B98A5A"/><rect x="14" y="6" width="12" height="1" fill="#CFA270"/><text x="20" y="13.5" font-size="5" text-anchor="middle">${esc(p.emoji)}</text></g>` +
       `<text x="${(x + 10 * sc).toFixed(1)}" y="${(y + 26 * sc).toFixed(1)}" text-anchor="middle" font-family="Heebo" font-size="${(4.6 * sc).toFixed(2)}" font-weight="700" fill="#F4EFFF" stroke="#141221" stroke-width=".6" paint-order="stroke">${esc(pxTrim(p.name, 12))}</text></g>`;
   });
@@ -2702,7 +2889,7 @@ function questLog(forGuy, later, sList, qCount, lounge, ezra, byId) {
     `<span><b style="color:#5ce1a0">פינת קפה</b> = לא עובד עכשיו</span><span><b style="color:#ffd23f">ספסל ליד החדר שלך</b> = מחכה לך</span>` +
     `<span><b style="color:#f87171">טלפון אדום</b> = משהו חשוב, כמו "לא לאתחל"</span><span><b style="color:#f4efff">לוח שנה</b> = התאריך של מה שנדחה</span>` +
     `<span><b style="color:#e9c98b">פתק</b> = נדחה</span><span><b style="color:#c3cad6">המעלית</b> = המחסן של הארכיון</span>` +
-    `<span><b style="color:#d6a77a">כוסות קפה על השולחן</b> = רמת המאמץ: כוס מים נמוך, 1–3 כוסות, קנקן מקסימום</span><span><b style="color:#a78bfa">קאפקייק</b> = Ultracode דלוק</span></div></aside>`;
+    `<span class="efft"><b style="color:#d6a77a">רמת המאמץ על השולחן</b>${pxEffortTable()}</span></div></aside>`;
 }
 
 function feedHtml(rows) {
