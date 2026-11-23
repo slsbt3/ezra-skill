@@ -305,6 +305,26 @@
   .pxtip { position: fixed; z-index: 1000; max-width: 360px; background: #1d1a2e; color: #f4efff; border: 3px solid #0b0a14; box-shadow: inset 0 0 0 2px #3a3460, 0 8px 24px rgba(0, 0, 0, .45);
     border-radius: 6px; padding: 10px 14px; font-family: var(--font); font-size: 15px; line-height: 1.55; white-space: pre-line; overflow-wrap: anywhere; pointer-events: none; }
   .pxtip::first-line { font-weight: 700; color: #ffd23f; }
+  /* The worker card (the owner, 23/11, "א + בר עבד היום"): its state in one word, the reason, and its day. */
+  .pxtip.pxcard { white-space: normal; width: 300px; max-width: 300px; } .pxtip.pxcard::first-line { color: inherit; font-weight: inherit; }
+  .pxcard .tc-top { display: flex; align-items: center; gap: 8px; }
+  .pxcard .tc-nm { font-weight: 800; font-size: 17px; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pxcard .tc-pill { font-size: 14px; font-weight: 800; border-radius: 12px; padding: 1px 10px; white-space: nowrap; line-height: 1.5; }
+  .tc-pill.you { background: #dc2626; color: #fff; } .tc-pill.work { background: #2563eb; color: #fff; } .tc-pill.other { background: #f59e0b; color: #2a1f10; }
+  .tc-pill.cafe { background: #6b7280; color: #fff; } .tc-pill.done { background: #16a34a; color: #fff; }
+  .pxcard .tc-why { margin-top: 8px; background: #fff4c2; color: #2a1f10; border-radius: 8px; padding: 7px 9px; font-size: 15px; line-height: 1.4; font-weight: 600; display: flex; gap: 7px; align-items: flex-start; }
+  .pxcard .tc-why .t { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+  .pxcard .tc-why small { display: block; font-size: 12.5px; color: #8a6d1c; font-weight: 800; margin-top: 2px; }
+  .pxcard .tc-doing { margin-top: 8px; font-size: 14.5px; line-height: 1.4; color: #e8e4ff; display: flex; gap: 7px; align-items: flex-start; }
+  .pxcard .tc-doing .t { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .pxcard .tc-wait { margin-top: 8px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 15px; font-weight: 700; }
+  .pxcard .tc-wait .w { background: #2b2742; border: 1px solid #4a4370; border-radius: 14px; padding: 1px 9px; white-space: nowrap; }
+  .pxcard .tc-lbl { margin-top: 10px; font-size: 12.5px; color: #a7a3c2; font-weight: 700; }
+  .pxcard .tc-day em { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255, 255, 255, .35); }
+  .pxcard .tc-hrs { position: relative; height: 15px; margin-top: 2px; font-size: 11px; font-weight: 700; color: #a7a3c2; }
+  .pxcard .tc-hrs span { position: absolute; top: 0; transform: translateX(50%); }
+  .pxcard .tc-day { position: relative; height: 10px; margin-top: 3px; background: #3a3460; border-radius: 4px; overflow: hidden; }
+  .pxcard .tc-day i { position: absolute; top: 0; bottom: 0; background: #5ce1a0; }
   @keyframes pxglint { 0%, 88%, 100% { opacity: 0; } 92% { opacity: 1; } }
   @keyframes pxtap { 0%, 30%, 60%, 100% { transform: translateY(0); } 15%, 45% { transform: translateY(-1px); } }
   @keyframes pxknock { 0%, 40%, 100% { transform: translateX(0); } 10%, 30% { transform: translateX(1px); } 20% { transform: translateX(-1px); } }
@@ -957,6 +977,46 @@ document.addEventListener('keydown', e => {
   if (pxOpen) pxOpen = null; else if (showArchive) showArchive = false; else return;
   if (last) render(last);
 });
+// The hover card of a worker (the owner, 23/11: "אם הוא מחכה לי אני רוצה לדעת למה", "לא ברור - לא נוח"; he chose "א + בר עבד היום"):
+// its state in one word on a coloured label, the reason in a line, and the bar of its day. From the last data.
+function pxWaitSince(t) {
+  const d = new Date(t); if (isNaN(d)) return '';
+  const n = new Date(), y = new Date(n); y.setDate(n.getDate() - 1);
+  const hm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  return d.toDateString() === n.toDateString() ? 'מ־' + hm : d.toDateString() === y.toDateString() ? 'מאתמול, ' + hm : 'מ־' + d.getDate() + '/' + (d.getMonth() + 1);
+}
+function pxWorkerCard(id) {
+  const rows = last && last.rows || [], r = rows.find(x => x.p.id === id); if (!r) return '';
+  const byId = Object.fromEntries(rows.map(x => [x.p.id, x])), s = r.s || {}, st = pxState(r), fem = r.p.figure === 'bina';
+  // Whom it waits for: the workers it asked (its open requests), when it is not working itself.
+  const others = st === 'idle' ? [...new Set(reqsOf(r).map(x => x.to))].filter(x => byId[x]).map(x => byId[x].p) : [];
+  const pill = st === 'wait' ? ['you', 'מחכה לך'] : st === 'work' || st === 'workwait' ? ['work', fem ? 'עובדת' : 'עובד'] :
+    others.length ? ['other', 'מחכה לעובדים'] : st === 'done' ? ['done', fem ? 'סיימה' : 'סיים'] : st === 'idle' ? ['cafe', fem ? 'ממתינה' : 'ממתין'] : ['cafe', '?'];
+  const top = `<div class="tc-top"><span style="font-size:20px">${esc(r.p.emoji || '')}</span><span class="tc-nm" style="color:${esc(pxTie(r.p))}">${esc(pxShortOf[id] || r.p.name)}</span>` +
+    `<span class="tc-pill ${pill[0]}">${pill[1]}</span></div>`;
+  // The reason: what it waits for from the owner (since its oldest open question), whom it waits for, or what it does.
+  let why = '';
+  if (st === 'wait') {
+    const wf = String(s.waitingForGuy == null ? '' : s.waitingForGuy).trim(), own = wf && !PX_NO_WAIT.test(wf);
+    const at = own ? Date.parse(s.updatedAt) : pxOpenGuy(r).map(i => Date.parse(i.at)).filter(Boolean).sort((a, b) => a - b)[0] || Date.parse(s.updatedAt);
+    why = `<div class="tc-why"><span>👤</span><div><div class="t">${esc(waitText(s) || s.now || '')}</div>${at ? `<small>${pxWaitSince(at)}</small>` : ''}</div></div>`;
+  } else if (others.length) why = `<div class="tc-wait"><span>⏳</span>${others.map(p => `<span class="w">${esc(p.emoji || '')} ${esc(pxShortOf[p.id] || p.name)}</span>`).join('')}</div>`;
+  else if (s.now) why = `<div class="tc-doing"><span>${st === 'done' ? '✓' : st === 'idle' ? '☕' : '⌨️'}</span><span class="t">${esc(s.now)}</span></div>`;
+  // Its day: green while it was in a turn (the hook's log), from 07:00 (or its first turn) until now; the yellow mark is now.
+  const now = Date.now(), d0 = new Date(); d0.setHours(7, 0, 0, 0);
+  const ev = ((last && last.attendance) || []).filter(e => e && e.id === id).map(e => ({ t: Date.parse(e.t), ev: e.ev })).filter(e => e.t).sort((a, b) => a.t - b.t);
+  const from = Math.min(d0.getTime(), ev.length ? ev[0].t : now), span = Math.max(1, now - from), seg = []; let on = null;
+  for (const e of ev) { if (e.ev === 'start' && on == null) on = e.t; else if (e.ev === 'stop' && on != null) { seg.push([on, e.t]); on = null; } }
+  if (on != null) seg.push([on, now]);
+  // The hours on it (the owner, 23/11: "הפס לא ברור שיהיו עליו שעות"): a line at every whole hour, the hour under it.
+  const pos = x => ((x - from) / span * 100).toFixed(1), hrs = [];
+  for (const h = new Date(from); ;) { h.setMinutes(0, 0, 0); h.setHours(h.getHours() + 1); if (h.getTime() >= now) break; hrs.push(h.getTime()); }
+  const step = hrs.length > 8 ? 2 : 1;
+  const day = `<div class="tc-day">${seg.map(([a, b]) => `<i style="right:${pos(a)}%;width:${Math.max(.8, (b - a) / span * 100).toFixed(1)}%"></i>`).join('')}` +
+    `${hrs.map(h => `<em style="right:${pos(h)}%"></em>`).join('')}</div>` +
+    `<div class="tc-hrs">${hrs.filter(h => new Date(h).getHours() % step === 0).map(h => `<span style="right:${pos(h)}%">${new Date(h).getHours()}</span>`).join('')}</div>`;
+  return { html: `${top}${why}<div class="tc-lbl">${fem ? 'עבדה היום' : 'עבד היום'}</div>${day}`, you: false };
+}
 // A styled tooltip for the office: bigger, readable, with line breaks, instead of the browser's one long line.
 // Its text comes from each item's <title>, which is moved to data-tip on the first hover so the browser does not show its own.
 let pxTipEl = null;
@@ -969,7 +1029,11 @@ document.addEventListener('mouseover', e => {
   if (t) { g.dataset.tip = t.textContent; t.remove(); }
   if (!g.dataset.tip) return;
   if (!pxTipEl) { pxTipEl = document.createElement('div'); pxTipEl.className = 'pxtip'; pxTipEl.setAttribute('role', 'tooltip'); document.body.appendChild(pxTipEl); }
-  pxTipEl.textContent = g.dataset.tip; pxTipEl.hidden = false;
+  // A worker: the card of icons (the owner, 23/11); anything else: its text.
+  const act = g.getAttribute('data-act') || '', card = act.indexOf('open:w:') === 0 ? pxWorkerCard(act.slice(7)) : null;
+  if (card && card.html) { pxTipEl.className = 'pxtip pxcard' + (card.you ? ' side' : ''); pxTipEl.innerHTML = card.html; }
+  else { pxTipEl.className = 'pxtip'; pxTipEl.textContent = g.dataset.tip; }
+  pxTipEl.hidden = false;
 });
 document.addEventListener('mousemove', e => {
   if (!pxTipEl || pxTipEl.hidden) return;
@@ -984,10 +1048,10 @@ document.addEventListener('mouseout', e => { if (!pxTipTarget(e.relatedTarget)) 
 const PX_HAIR = ['#2B1A10', '#4A2A12', '#7A3A12', '#1E1B2E', '#3A2010', '#8A5A2B', '#5A3A22'];
 const PX_SKIN = ['#F2C49B', '#E8B48A', '#C98E64', '#F5D0B0', '#B9805A'];
 // The line under each worker's name: short and simple.
-const PX_LABEL = { wait: 'מחכה על הספסל', workwait: 'עובד, ומחכה לך', work: 'עובד', idle: 'ממתין, בקפה', done: 'סיים, בקפה', none: 'אין קובץ סטטוס' };
+const PX_LABEL = { wait: 'מחכה על הספסל', workwait: 'עובד', work: 'עובד', idle: 'ממתין, בקפה', done: 'סיים, בקפה', none: 'אין קובץ סטטוס' };
 // Bina is a woman, so her line is in the feminine.
-const PX_LABEL_F = { wait: 'מחכה על הספסל', workwait: 'עובדת, ומחכה לך', work: 'עובדת', idle: 'ממתינה, בקפה', done: 'סיימה, בקפה', none: 'אין קובץ סטטוס' };
-const PX_COLOR = { wait: '#FFD23F', workwait: '#FFD23F', work: '#9FE8FF', idle: '#B4B4BD', done: '#5CE1A0', none: '#8C8C97' };
+const PX_LABEL_F = { wait: 'מחכה על הספסל', workwait: 'עובדת', work: 'עובדת', idle: 'ממתינה, בקפה', done: 'סיימה, בקפה', none: 'אין קובץ סטטוס' };
+const PX_COLOR = { wait: '#FFD23F', workwait: '#9FE8FF', work: '#9FE8FF', idle: '#B4B4BD', done: '#5CE1A0', none: '#8C8C97' };
 const pxHash = s => { let h = 0; for (const c of String(s)) h = (h * 31 + c.codePointAt(0)) >>> 0; return h; };
 // Bina has her own skin and hair (her figure, below).
 const pxLook = p => { if (p.figure === 'bina') return { hair: PX_BINA.hair, skin: PX_BINA.skin }; const h = pxHash(p.id || p.name); return { hair: PX_HAIR[h % PX_HAIR.length], skin: PX_SKIN[(h >>> 3) % PX_SKIN.length] }; };
@@ -1003,11 +1067,26 @@ const pxTint = (hex, k) => { const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '
 const pxTie = p => { for (const [re, c] of PX_EMOJI_COLOR) if (re.test(p.emoji || '')) return c; return p.color || '#8C8C97'; };
 // One state per worker. Whoever waits for the owner's answer sits on the bench, also while it keeps working (the owner, 22/11: "אם
 // יש מישהו שמחכה לתשובה שלי - למה הוא לא על הספסל?"; until then such a worker stayed at its desk).
+// Who is in a turn now, by the hook's log of today: the id's last event is "start", from less than 4 hours ago. null for an id
+// the hook has nothing on today (a worker on a machine without the hook, like 🎥 on .124).
+let pxTurnSrc = null, pxTurnMap = {};
+function pxInTurn(id) {
+  const a = (last && last.attendance) || [];
+  if (a !== pxTurnSrc) {
+    pxTurnSrc = a; pxTurnMap = {};
+    for (const e of a) { const tm = e && Date.parse(e.t); if (tm && (!pxTurnMap[e.id] || tm >= pxTurnMap[e.id].t)) pxTurnMap[e.id] = { t: tm, ev: e.ev }; }
+  }
+  const x = pxTurnMap[id]; if (!x) return null;
+  return x.ev === 'start' && Date.now() - x.t < 4 * 3600e3;
+}
 function pxState(r) {
   if (!r.s) return 'none';
-  const st = statusOf(r.s), w = !!waitText(r.s);
-  if (st === WAIT) return 'wait';
-  if (st === 'עובד') return w ? 'wait' : 'work';
+  const st = statusOf(r.s), w = !!waitText(r.s), turn = pxInTurn(r.p.id);
+  // The bench is only for one who waits for the owner and does not work now (the owner, 23/11: "יש ספסל למי שמחכה לי ולא עובד
+  // כבר"). In a turn now: at the desk, even with a question for him; out of a turn: on the bench, whatever the card's status says.
+  if ((w || st === WAIT) && turn != null) return turn ? 'workwait' : 'wait';
+  if (st === WAIT || (w && st === 'none')) return 'wait';
+  if (st === 'עובד') return w ? 'workwait' : 'work';
   if (st === 'ממתין') return w ? 'wait' : 'idle';
   if (st === 'הסתיים') return 'done';
   return 'none';
